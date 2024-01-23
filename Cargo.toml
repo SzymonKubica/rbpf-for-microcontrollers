@@ -24,12 +24,13 @@ include = [
 
 [dependencies]
 
-combine = "4.6"
-libc = "0.2"
-time = "0.2"
+combine = { version = "4.6", default-features = false}
+libc = { version = "0.2", default-features = false }
+time = { version = "0.2", default-features = false }
 byteorder = { version = "1.2", default-features = false }
-hashbrown = "0.13.2"
-libc-print = "0.1.22"
+hashbrown = { version = "0.13.2", default-features = false }
+# ToDO: fix printing
+#libc-print = { version = "0.1.22", default-fetures = false}
 
 # Optional Dependencies for the CraneLift JIT
 cranelift-codegen = { version = "0.99", optional = true }

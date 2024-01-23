@@ -8,7 +8,7 @@ pub mod with_alloc {
     pub use alloc::string::ToString;
 
     pub mod collections {
-        pub use hashbrown::{HashSet, HashMap};
         pub use alloc::vec::Vec;
+        pub use alloc::collections::BTreeMap;
     }
 }

@@ -32,7 +32,6 @@
 extern crate byteorder;
 extern crate combine;
 extern crate time;
-extern crate libc_print;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;
@@ -64,13 +63,18 @@ mod stdlib {
 }
 
 
-use stdlib::collections::HashMap;
+use hashbrown::HashMap;
+use hashbrown::hash_map::DefaultHashBuilder;
 use stdlib::collections::Vec;
+use stdlib::collections::BTreeMap;
 use byteorder::{ByteOrder, LittleEndian};
 use stdlib::{Error, ErrorKind};
 use stdlib::u32;
 
+
+#[cfg(std)]
 mod asm_parser;
+#[cfg(std)]
 pub mod assembler;
 #[cfg(feature = "cranelift")]
 mod cranelift;
@@ -145,7 +149,7 @@ pub struct EbpfVmMbuff<'a> {
     jit: Option<jit::JitMemory<'a>>,
     #[cfg(feature = "cranelift")]
     cranelift_prog: Option<cranelift::CraneliftProgram>,
-    helpers: HashMap<u32, ebpf::Helper>,
+    helpers: BTreeMap<u32, ebpf::Helper>,
 }
 
 impl<'a> EbpfVmMbuff<'a> {
@@ -176,7 +180,7 @@ impl<'a> EbpfVmMbuff<'a> {
             jit: None,
             #[cfg(feature = "cranelift")]
             cranelift_prog: None,
-            helpers: HashMap::new(),
+            helpers: BTreeMap::new(),
         })
     }
 

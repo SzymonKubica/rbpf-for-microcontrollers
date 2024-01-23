@@ -6,7 +6,7 @@
 
 use ebpf;
 use stdlib::String;
-use stdlib::println;
+//use stdlib::println;
 use stdlib::collections::Vec;
 use stdlib::ToString;
 
@@ -24,7 +24,7 @@ fn alu_reg_str(name: &str, insn: &ebpf::Insn) -> String {
 fn byteswap_str(name: &str, insn: &ebpf::Insn) -> String {
     match insn.imm {
         16 | 32 | 64 => {},
-        _ => println!("[Disassembler] Warning: Invalid offset value for {name} insn")
+        _ => () // println!("[Disassembler] Warning: Invalid offset value for {name} insn")
     }
     format!("{name}{} r{}", insn.imm, insn.dst)
 }
@@ -389,6 +389,6 @@ pub fn to_insn_vec(prog: &[u8]) -> Vec<HLInsn> {
 /// ```
 pub fn disassemble(prog: &[u8]) {
     for insn in to_insn_vec(prog) {
-        println!("{}", insn.desc);
+        //println!("{}", insn.desc);
     }
 }
