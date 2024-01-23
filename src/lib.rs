@@ -27,6 +27,8 @@
     )
 )]
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
 extern crate byteorder;
 extern crate combine;
 extern crate time;
@@ -42,10 +44,29 @@ extern crate cranelift_module;
 #[cfg(feature = "cranelift")]
 extern crate cranelift_native;
 
+// Conditional importing based on std/no_std described here:
+// https://gist.github.com/tdelabro/b2d1f2a0f94ceba72b718b92f9a7ad7b
+#[cfg(feature = "std")]
+include!("./with_std.rs");
+#[cfg(not(feature = "std"))]
+include!("./without_std.rs");
+#[cfg(not(feature = "std"))]
+include!("./with_alloc.rs");
+
+mod stdlib {
+    #[cfg(feature = "std")]
+    pub use crate::with_std::*;
+    #[cfg(not(feature = "std"))]
+    pub use crate::without_std::*;
+    #[cfg(not(feature = "std"))]
+    pub use crate::with_alloc::*;
+}
+
+
+use stdlib::collections::HashMap;
 use byteorder::{ByteOrder, LittleEndian};
-use std::collections::HashMap;
-use std::io::{Error, ErrorKind};
-use std::u32;
+use stdlib::{Error, ErrorKind};
+use stdlib::u32;
 
 mod asm_parser;
 pub mod assembler;

@@ -28,6 +28,7 @@ combine = "4.6"
 libc = "0.2"
 time = "0.2"
 byteorder = "1.2"
+hashbrown = "0.13.2"
 
 # Optional Dependencies for the CraneLift JIT
 cranelift-codegen = { version = "0.99", optional = true }
@@ -43,7 +44,11 @@ json = "0.11"
 hex = "0.4.3"
 
 [features]
-default = []
+default = ["std"]
+#default = []
+std = []
+alloc = []
+
 cranelift = [
     "dep:cranelift-codegen",
     "dep:cranelift-frontend",
