@@ -63,8 +63,6 @@ mod stdlib {
 }
 
 
-use hashbrown::HashMap;
-use hashbrown::hash_map::DefaultHashBuilder;
 use stdlib::collections::Vec;
 use stdlib::collections::BTreeMap;
 use byteorder::{ByteOrder, LittleEndian};

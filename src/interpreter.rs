@@ -6,7 +6,6 @@
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
 use stdlib::collections::BTreeMap;
-use hashbrown::HashMap;
 use stdlib::{Error, ErrorKind};
 
 use ebpf;
