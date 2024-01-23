@@ -440,6 +440,17 @@ fn test_vm_mod_by_zero_imm() {
     assert_eq!(vm.execute_program().unwrap(), 0x1);
 }
 
+// Make sure we only consider the last 32 bits of the divisor.
+#[test]
+fn test_vm_mod_by_zero_reg_long() {
+    let prog = assemble("
+        lddw r1, 0x100000000
+        mod32 r0, r1
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x0);
+}
+
 #[test]
 fn test_vm_div64_by_zero_reg() {
     let prog = assemble("
@@ -456,6 +467,17 @@ fn test_vm_div_by_zero_reg() {
     let prog = assemble("
         mov32 r0, 1
         mov32 r1, 0
+        div32 r0, r1
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x0);
+}
+
+// Make sure we only consider the last 32 bits of the divisor.
+#[test]
+fn test_vm_div_by_zero_reg_long() {
+    let prog = assemble("
+        lddw r1, 0x100000000
         div32 r0, r1
         exit").unwrap();
     let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
@@ -1577,14 +1599,87 @@ fn test_vm_le64() {
 }
 
 #[test]
+fn test_vm_lsh_imm() {
+    let prog = assemble("
+        mov r0, 1
+        lsh r0, 4
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x10);
+}
+
+#[test]
 fn test_vm_lsh_reg() {
     let prog = assemble("
-        mov r0, 0x1
+        mov r0, 1
         mov r7, 4
         lsh r0, r7
         exit").unwrap();
     let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
     assert_eq!(vm.execute_program().unwrap(), 0x10);
+}
+
+#[test]
+fn test_vm_lsh32_imm() {
+    let prog = assemble("
+        mov32 r0, 1
+        lsh32 r0, 4
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x10);
+}
+
+#[test]
+fn test_vm_lsh32_reg() {
+    let prog = assemble("
+        mov32 r0, 1
+        mov32 r7, 4
+        lsh32 r0, r7
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x10);
+}
+
+#[test]
+fn test_vm_lsh_imm_overflow() {
+    let prog = assemble("
+        mov r0, 1
+        lsh r0, 64
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x1);
+}
+
+#[test]
+fn test_vm_lsh_reg_overflow() {
+    let prog = assemble("
+        mov r0, 1
+        mov r7, 64
+        lsh r0, r7
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x1);
+}
+
+#[test]
+fn test_vm_lsh32_imm_overflow() {
+    let prog = assemble("
+        mov32 r0, 1
+        lsh32 r0, 32
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x1);
+}
+
+#[test]
+fn test_vm_lsh32_reg_overflow() {
+    let prog = assemble("
+        mov32 r0, 1
+        mov32 r7, 32
+        lsh32 r0, r7
+        exit").unwrap();
+    let vm = rbpf::EbpfVmNoData::new(Some(&prog)).unwrap();
+    assert_eq!(vm.execute_program().unwrap(), 0x1);
 }
 
 #[test]
@@ -1836,6 +1931,24 @@ fn test_vm_stdw() {
     ];
     let vm = rbpf::EbpfVmRaw::new(Some(&prog)).unwrap();
     assert_eq!(vm.execute_program(mem).unwrap(), 0x44332211);
+}
+
+// If this case is not handled properly in check_mem(), then we may overflow when adding the
+// context address and the offset, and make the thread panic with "attempt to add with overflow".
+// Check that we panic with the expected out-of-bounds error.
+#[test]
+#[should_panic(expected = "Error: out of bounds memory store (insn #1)")]
+fn test_vm_stdw_add_overflow() {
+    let prog = assemble("
+        stdw [r2-0x1], 0x44332211
+        ldxw r0, [r1+2]
+        exit").unwrap();
+    let mem = &mut [
+        0xaa, 0xbb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xcc, 0xdd
+    ];
+    let mut vm = rbpf::EbpfVmFixedMbuff::new(Some(&prog), 0x00, 0x10).unwrap();
+    _ = vm.execute_program(mem).unwrap();
 }
 
 #[test]

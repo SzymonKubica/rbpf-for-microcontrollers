@@ -12,14 +12,16 @@ use ebpf;
 
 fn check_mem(addr: u64, len: usize, access_type: &str, insn_ptr: usize,
              mbuff: &[u8], mem: &[u8], stack: &[u8]) -> Result<(), Error> {
-    if mbuff.as_ptr() as u64 <= addr && addr + len as u64 <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
-        return Ok(())
-    }
-    if mem.as_ptr() as u64 <= addr && addr + len as u64 <= mem.as_ptr() as u64 + mem.len() as u64 {
-        return Ok(())
-    }
-    if stack.as_ptr() as u64 <= addr && addr + len as u64 <= stack.as_ptr() as u64 + stack.len() as u64 {
-        return Ok(())
+    if let Some(addr_end) = addr.checked_add(len as u64) {
+      if mbuff.as_ptr() as u64 <= addr && addr_end <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
+          return Ok(())
+      }
+      if mem.as_ptr() as u64 <= addr && addr_end <= mem.as_ptr() as u64 + mem.len() as u64 {
+          return Ok(())
+      }
+      if stack.as_ptr() as u64 <= addr && addr_end <= stack.as_ptr() as u64 + stack.len() as u64 {
+          return Ok(())
+      }
     }
 
     Err(Error::new(ErrorKind::Other, format!(
@@ -35,6 +37,8 @@ fn check_mem(addr: u64, len: usize, access_type: &str, insn_ptr: usize,
 #[allow(cyclomatic_complexity)]
 pub fn execute_program(prog_: Option<&[u8]>, mem: &[u8], mbuff: &[u8], helpers: &HashMap<u32, ebpf::Helper>) -> Result<u64, Error> {
     const U32MAX: u64 = u32::MAX as u64;
+    const SHIFT_MASK_32: u32 = 0x1f;
+    const SHIFT_MASK_64: u64 = 0x3f;
 
     let prog = match prog_ {
         Some(prog) => prog,
@@ -214,22 +218,22 @@ pub fn execute_program(prog_: Option<&[u8]>, mem: &[u8], mbuff: &[u8], helpers: 
             ebpf::SUB32_REG  => reg[_dst] = (reg[_dst] as i32).wrapping_sub(reg[_src] as i32) as u64,
             ebpf::MUL32_IMM  => reg[_dst] = (reg[_dst] as i32).wrapping_mul(insn.imm)         as u64,
             ebpf::MUL32_REG  => reg[_dst] = (reg[_dst] as i32).wrapping_mul(reg[_src] as i32) as u64,
-            ebpf::DIV32_IMM if insn.imm == 0 => reg[_dst] = 0,
+            ebpf::DIV32_IMM if insn.imm as u32 == 0 => reg[_dst] = 0,
             ebpf::DIV32_IMM  => reg[_dst] = (reg[_dst] as u32 / insn.imm              as u32) as u64,
-            ebpf::DIV32_REG if reg[_src] == 0 => reg[_dst] = 0,
+            ebpf::DIV32_REG if reg[_src] as u32 == 0 => reg[_dst] = 0,
             ebpf::DIV32_REG  => reg[_dst] = (reg[_dst] as u32 / reg[_src]             as u32) as u64,
             ebpf::OR32_IMM   =>   reg[_dst] = (reg[_dst] as u32             | insn.imm  as u32) as u64,
             ebpf::OR32_REG   =>   reg[_dst] = (reg[_dst] as u32             | reg[_src] as u32) as u64,
             ebpf::AND32_IMM  =>   reg[_dst] = (reg[_dst] as u32             & insn.imm  as u32) as u64,
             ebpf::AND32_REG  =>   reg[_dst] = (reg[_dst] as u32             & reg[_src] as u32) as u64,
-            ebpf::LSH32_IMM  =>   reg[_dst] = (reg[_dst] as u32).wrapping_shl(insn.imm  as u32) as u64,
-            ebpf::LSH32_REG  =>   reg[_dst] = (reg[_dst] as u32).wrapping_shl(reg[_src] as u32) as u64,
-            ebpf::RSH32_IMM  =>   reg[_dst] = (reg[_dst] as u32).wrapping_shr(insn.imm  as u32) as u64,
-            ebpf::RSH32_REG  =>   reg[_dst] = (reg[_dst] as u32).wrapping_shr(reg[_src] as u32) as u64,
+            ebpf::LSH32_IMM  =>   reg[_dst] = (reg[_dst] as u32).wrapping_shl(insn.imm  as u32 & SHIFT_MASK_32) as u64,
+            ebpf::LSH32_REG  =>   reg[_dst] = (reg[_dst] as u32).wrapping_shl(reg[_src] as u32 & SHIFT_MASK_32) as u64,
+            ebpf::RSH32_IMM  =>   reg[_dst] = (reg[_dst] as u32).wrapping_shr(insn.imm  as u32 & SHIFT_MASK_32) as u64,
+            ebpf::RSH32_REG  =>   reg[_dst] = (reg[_dst] as u32).wrapping_shr(reg[_src] as u32 & SHIFT_MASK_32) as u64,
             ebpf::NEG32      => { reg[_dst] = (reg[_dst] as i32).wrapping_neg()                 as u64; reg[_dst] &= U32MAX; },
-            ebpf::MOD32_IMM if insn.imm == 0 => (),
+            ebpf::MOD32_IMM if insn.imm as u32 == 0 => (),
             ebpf::MOD32_IMM  =>   reg[_dst] = (reg[_dst] as u32             % insn.imm  as u32) as u64,
-            ebpf::MOD32_REG if reg[_src] == 0 => (),
+            ebpf::MOD32_REG if reg[_src] as u32 == 0 => (),
             ebpf::MOD32_REG  =>   reg[_dst] = (reg[_dst] as u32 % reg[_src]             as u32) as u64,
             ebpf::XOR32_IMM  =>   reg[_dst] = (reg[_dst] as u32             ^ insn.imm  as u32) as u64,
             ebpf::XOR32_REG  =>   reg[_dst] = (reg[_dst] as u32             ^ reg[_src] as u32) as u64,
@@ -269,10 +273,10 @@ pub fn execute_program(prog_: Option<&[u8]>, mem: &[u8], mbuff: &[u8], helpers: 
             ebpf::OR64_REG   => reg[_dst] |=  reg[_src],
             ebpf::AND64_IMM  => reg[_dst] &=  insn.imm as u64,
             ebpf::AND64_REG  => reg[_dst] &=  reg[_src],
-            ebpf::LSH64_IMM  => reg[_dst] <<= insn.imm as u64,
-            ebpf::LSH64_REG  => reg[_dst] <<= reg[_src],
-            ebpf::RSH64_IMM  => reg[_dst] >>= insn.imm as u64,
-            ebpf::RSH64_REG  => reg[_dst] >>= reg[_src],
+            ebpf::LSH64_IMM  => reg[_dst] <<= insn.imm as u64 & SHIFT_MASK_64,
+            ebpf::LSH64_REG  => reg[_dst] <<= reg[_src] & SHIFT_MASK_64,
+            ebpf::RSH64_IMM  => reg[_dst] >>= insn.imm as u64 & SHIFT_MASK_64,
+            ebpf::RSH64_REG  => reg[_dst] >>= reg[_src] & SHIFT_MASK_64,
             ebpf::NEG64      => reg[_dst] = -(reg[_dst] as i64) as u64,
             ebpf::MOD64_IMM if insn.imm == 0 => (),
             ebpf::MOD64_IMM  => reg[_dst] %=  insn.imm as u64,
