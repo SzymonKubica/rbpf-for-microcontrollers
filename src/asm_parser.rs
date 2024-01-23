@@ -6,6 +6,10 @@
 
 //! This module parses eBPF assembly language source code.
 
+use stdlib::String;
+use stdlib::ToString;
+use stdlib::collections::Vec;
+
 use combine::parser::char::{alpha_num, char, digit, hex_digit, spaces, string};
 use combine::stream::position::{self};
 use combine::{
@@ -593,7 +597,7 @@ exit
     fn test_initial_whitespace() {
         assert_eq!(
             parse(
-                " 
+                "
                           exit"
             ),
             Ok(vec![Instruction {

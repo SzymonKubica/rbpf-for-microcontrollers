@@ -20,7 +20,7 @@
 
 
 use ebpf;
-use std::io::{Error, ErrorKind};
+use stdlib::{Error, ErrorKind};
 
 fn reject<S: AsRef<str>>(msg: S) -> Result<(), Error> {
     let full_msg = format!("[Verifier] Error: {}", msg.as_ref());

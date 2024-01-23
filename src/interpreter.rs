@@ -5,8 +5,8 @@
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
-use std::collections::HashMap;
-use std::io::{Error, ErrorKind};
+use stdlib::collections::HashMap;
+use stdlib::{Error, ErrorKind};
 
 use ebpf;
 

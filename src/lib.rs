@@ -32,6 +32,7 @@
 extern crate byteorder;
 extern crate combine;
 extern crate time;
+extern crate libc_print;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;
@@ -64,6 +65,7 @@ mod stdlib {
 
 
 use stdlib::collections::HashMap;
+use stdlib::collections::Vec;
 use byteorder::{ByteOrder, LittleEndian};
 use stdlib::{Error, ErrorKind};
 use stdlib::u32;

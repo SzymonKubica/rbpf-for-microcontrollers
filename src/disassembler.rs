@@ -5,6 +5,10 @@
 //! for example to disassemble the code into a human-readable format.
 
 use ebpf;
+use stdlib::String;
+use stdlib::println;
+use stdlib::collections::Vec;
+use stdlib::ToString;
 
 #[inline]
 fn alu_imm_str(name: &str, insn: &ebpf::Insn) -> String {

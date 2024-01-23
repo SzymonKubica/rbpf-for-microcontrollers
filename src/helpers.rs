@@ -17,8 +17,9 @@
 //! respect this convention.
 
 extern crate libc;
+use stdlib::println;
 
-use std::u64;
+use stdlib::u64;
 use time;
 
 // Helpers associated to kernel helpers
