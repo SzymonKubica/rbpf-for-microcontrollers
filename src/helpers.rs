@@ -16,7 +16,6 @@
 //! value. Hence some helpers have unused arguments, or return a 0 value in all cases, in order to
 //! respect this convention.
 
-extern crate libc;
 //use stdlib::println;
 
 use stdlib::u64;
