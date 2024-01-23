@@ -32,6 +32,7 @@
 extern crate byteorder;
 extern crate combine;
 extern crate time;
+extern crate libc_print;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;

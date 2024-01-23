@@ -20,8 +20,6 @@ extern crate libc;
 //use stdlib::println;
 
 use stdlib::u64;
-use stdlib::f64;
-use time;
 
 // Helpers associated to kernel helpers
 // See also linux/include/uapi/linux/bpf.h in Linux kernel sources.
