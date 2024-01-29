@@ -3,7 +3,8 @@ pub mod without_std {
     use alloc::string::String;
     pub use core::u32;
     pub use core::u64;
-    pub use libc_print::std_name::{println, eprintln, dbg};
+    // Adapt this with whatever printing functionality your host OS requires.
+    pub use riot_wrappers::println;
 
     /// Dummy implementation of Error for no std.
     /// It ensures that the existing code can use it with the same interface
@@ -16,11 +17,13 @@ pub mod without_std {
 
     impl Error {
         /// New function added for compatibility with the existing code.
-        pub fn new<S : Into<String>>(kind: ErrorKind, error: S) -> Error {
-            Error { kind, error: error.into() }
+        pub fn new<S: Into<String>>(kind: ErrorKind, error: S) -> Error {
+            Error {
+                kind,
+                error: error.into(),
+            }
         }
     }
-
 
     /// The minimum set of variants to make the dummy ErrorKind work with
     /// the existing code.

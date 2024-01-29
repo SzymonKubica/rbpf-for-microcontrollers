@@ -27,7 +27,8 @@ include = [
 combine = { version = "4.6", default-features = false}
 time = { version = "0.2", default-features = false }
 byteorder = { version = "1.2", default-features = false }
-libc-print = { version = "0.1.22", default-features = false}
+riot-wrappers = { version = "0.8", features = [ "set_panic_handler" ] }
+libm = "0.2.8"
 
 # Optional Dependencies for the CraneLift JIT
 cranelift-codegen = { version = "0.99", optional = true }
