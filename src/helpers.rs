@@ -110,17 +110,6 @@ pub fn bpf_trace_printf(unused1: u64, unused2: u64, arg3: u64, arg4: u64, arg5: 
     "bpf_trace_printf: 0x, 0x, 0x\n".len() as u64 + size_arg(arg3) + size_arg(arg4) + size_arg(arg5)
 }
 
-// Custom helpers implementing the middleware layer for RIOT
-//
-/// Index of helper `bpf_now_ms()`, returns the current time in milliseconds by
-/// calling into RIOT.
-pub const BPF_NOW_MS_IDX: u32 = 0x20;
-
-pub fn bpf_now_ms(unused1: u64, unused2: u64, unused3: u64, unused4: u64, unused5: u64) -> u64 {
-    let clock = unsafe { riot_sys::ZTIMER_MSEC as *mut riot_sys::inline::ztimer_clock_t };
-    let now: u32 = unsafe { riot_sys::inline::ztimer_now(clock) };
-    now as u64
-}
 
 // Helpers coming from uBPF <https://github.com/iovisor/ubpf/blob/master/vm/test.c>
 
