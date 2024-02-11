@@ -7,13 +7,17 @@
 
 use stdlib::collections::BTreeMap;
 use stdlib::{Error, ErrorKind};
+use crate::stdlib::println;
 
 use ebpf;
 
 fn check_mem(addr: u64, len: usize, access_type: &str, insn_ptr: usize,
              mbuff: &[u8], mem: &[u8], stack: &[u8]) -> Result<(), Error> {
     if let Some(addr_end) = addr.checked_add(len as u64) {
-      if mbuff.as_ptr() as u64 <= addr && addr_end <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
+    //println!("Checking memory load: {}", addr);
+    //println!("mbuff: start={} len={}", mbuff.as_ptr() as u64, mbuff.len() as u64);
+    //println!("mem: start={} len={}", mem.as_ptr() as u64, mem.len() as u64);
+    if mbuff.as_ptr() as u64 <= addr && addr_end <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
           return Ok(())
       }
       if mem.as_ptr() as u64 <= addr && addr_end <= mem.as_ptr() as u64 + mem.len() as u64 {
