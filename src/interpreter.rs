@@ -14,9 +14,9 @@ use ebpf;
 fn check_mem(addr: u64, len: usize, access_type: &str, insn_ptr: usize,
              mbuff: &[u8], mem: &[u8], stack: &[u8]) -> Result<(), Error> {
     if let Some(addr_end) = addr.checked_add(len as u64) {
-    //println!("Checking memory load: {}", addr);
-    //println!("mbuff: start={} len={}", mbuff.as_ptr() as u64, mbuff.len() as u64);
-    //println!("mem: start={} len={}", mem.as_ptr() as u64, mem.len() as u64);
+    println!("Checking memory load: {}", addr);
+    println!("mbuff: start={} len={}", mbuff.as_ptr() as u64, mbuff.len() as u64);
+    println!("mem: start={} len={}", mem.as_ptr() as u64, mem.len() as u64);
     if mbuff.as_ptr() as u64 <= addr && addr_end <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
           return Ok(())
       }
@@ -36,6 +36,44 @@ fn check_mem(addr: u64, len: usize, access_type: &str, insn_ptr: usize,
         stack.as_ptr() as u64, stack.len()
     )))
 }
+
+struct BytecodeHeader {
+    magic: u32,   /*Magic number */
+    version: u32, /*Version of the application */
+    flags: u32,
+    data_len: u32,   /*Length of the data section */
+    rodata_len: u32, /*Length of the rodata section */
+    text_len: u32,   /*Length of the text section */
+    functions: u32,  /*Number of functions available */
+}
+
+struct Program {
+    text_section_offset: usize,
+    prog_len: usize,
+}
+
+fn extract_instr_ptr(prog: &[u8]) -> Program {
+    let header_size = 28;
+    unsafe {
+        let header = prog.as_ptr() as *const BytecodeHeader;
+        println!("Magic: {}", (*header).magic);
+        println!("Version: {}", (*header).version);
+        println!("Flags: {}", (*header).flags);
+        println!("data_len: {}", (*header).data_len);
+        println!("rodata_len: {}", (*header).rodata_len);
+        println!("text_len: {}", (*header).text_len);
+        println!("functions: {}", (*header).functions);
+
+        let offset = header_size + (*header).data_len + (*header).rodata_len;
+        return Program {
+            text_section_offset: offset as usize,
+            prog_len: (*header).text_len as usize,
+        };
+
+    }
+
+}
+
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
@@ -71,8 +109,15 @@ pub fn execute_program(prog_: Option<&[u8]>, mem: &[u8], mbuff: &[u8], helpers: 
 
     // Loop on instructions
     let mut insn_ptr:usize = 0;
+    // We need to adapt it here to work with Femto-Container bytecode.
+    // The starting instruction pointer isn't the start of the program. It is
+    // the start of the .text section.
+    let program = extract_instr_ptr(prog);
+    let prog_text = &prog[program.text_section_offset..];
     while insn_ptr * ebpf::INSN_SIZE < prog.len() {
-        let insn = ebpf::get_insn(prog, insn_ptr);
+        let insn = ebpf::get_insn(prog_text, insn_ptr);
+        println!("Instruction: {:?}", insn);
+
         insn_ptr += 1;
         let _dst = insn.dst as usize;
         let _src = insn.src as usize;
@@ -129,7 +174,7 @@ pub fn execute_program(prog_: Option<&[u8]>, mem: &[u8], mbuff: &[u8], helpers: 
             },
 
             ebpf::LD_DW_IMM  => {
-                let next_insn = ebpf::get_insn(prog, insn_ptr);
+                let next_insn = ebpf::get_insn(prog_text, insn_ptr);
                 insn_ptr += 1;
                 reg[_dst] = ((insn.imm as u32) as u64) + ((next_insn.imm as u64) << 32);
             },
