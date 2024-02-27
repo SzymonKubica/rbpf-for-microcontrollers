@@ -128,22 +128,23 @@ fn extract_instr_ptr(prog: &[u8]) -> Program {
     let header_size = 28;
     unsafe {
         let header = prog.as_ptr() as *const BytecodeHeader;
-        println!("Magic: {}", (*header).magic);
-        println!("Version: {}", (*header).version);
-        println!("Flags: {}", (*header).flags);
-        println!("data_len: {}", (*header).data_len);
-        println!("rodata_len: {}", (*header).rodata_len);
-        println!("text_len: {}", (*header).text_len);
-        println!("functions: {}", (*header).functions);
+        let debug = false;
+        if debug {
+            println!("Magic: {}", (*header).magic);
+            println!("Version: {}", (*header).version);
+            println!("Flags: {}", (*header).flags);
+            println!("data_len: {}", (*header).data_len);
+            println!("rodata_len: {}", (*header).rodata_len);
+            println!("text_len: {}", (*header).text_len);
+            println!("functions: {}", (*header).functions);
+        }
 
         let offset = header_size + (*header).data_len + (*header).rodata_len;
         return Program {
             text_section_offset: offset as usize,
             prog_len: (*header).text_len as usize,
         };
-
     }
-
 }
 
 pub fn check(prog: &[u8]) -> Result<(), Error> {
@@ -168,7 +169,7 @@ pub fn check(prog: &[u8]) -> Result<(), Error> {
             ebpf::LD_IND_W => {}
             ebpf::LD_IND_DW => {}
 
-            ebpf::LD_DW_IMM => {
+            ebpf::LD_DW_IMM | ebpf::LDDWD_IMM | ebpf::LDDWR_IMM => {
                 store = true;
                 check_load_dw(&prog_text, insn_ptr)?;
                 insn_ptr += 1;

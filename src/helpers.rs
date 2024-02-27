@@ -20,9 +20,6 @@ use libm::{floor, log};
 use stdlib::println;
 use stdlib::u64;
 
-/// For calling into RIOT syscalls
-use riot_wrappers::riot_sys;
-
 // Helpers associated to kernel helpers
 // See also linux/include/uapi/linux/bpf.h in Linux kernel sources.
 
