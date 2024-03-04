@@ -91,15 +91,6 @@ fn extract_instr_ptr(prog: &[u8]) -> Program {
     let header_size = 28;
     unsafe {
         let header = prog.as_ptr() as *const BytecodeHeader;
-        /*
-        println!("Magic: {}", (*header).magic);
-        println!("Version: {}", (*header).version);
-        println!("Flags: {}", (*header).flags);
-        println!("data_len: {}", (*header).data_len);
-        println!("rodata_len: {}", (*header).rodata_len);
-        println!("text_len: {}", (*header).text_len);
-        println!("functions: {}", (*header).functions);
-        */
 
         let text_offset = header_size + (*header).data_len + (*header).rodata_len;
         let data_offset = header_size;
@@ -170,7 +161,6 @@ pub fn execute_program(
     let prog_text = &prog[program.text_section_offset..];
     while insn_ptr * ebpf::INSN_SIZE < prog.len() {
         let insn = ebpf::get_insn(prog_text, insn_ptr);
-        //println!("Instruction: {:?}", insn);
 
         insn_ptr += 1;
         let _dst = insn.dst as usize;
