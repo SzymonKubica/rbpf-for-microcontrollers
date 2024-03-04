@@ -6,7 +6,7 @@
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
 use crate::stdlib::println;
-use stdlib::collections::BTreeMap;
+use stdlib::collections::{BTreeMap, Vec};
 use stdlib::{Error, ErrorKind};
 
 use ebpf;
@@ -80,11 +80,18 @@ struct BytecodeHeader {
     functions: u32,  /*Number of functions available */
 }
 
+#[derive(Copy, Clone, Debug)]
+struct FunctionRelocation {
+    instruction_offset: u32,
+    function_text_offset: u32,
+}
+
 struct Program {
     text_section_offset: usize,
     data_section_offset: usize,
     rodata_section_offset: usize,
     prog_len: usize,
+    relocated_calls: Vec<FunctionRelocation>,
 }
 
 fn extract_instr_ptr(prog: &[u8]) -> Program {
@@ -95,11 +102,28 @@ fn extract_instr_ptr(prog: &[u8]) -> Program {
         let text_offset = header_size + (*header).data_len + (*header).rodata_len;
         let data_offset = header_size;
         let rodata_offset = header_size + (*header).data_len;
+        let function_relocations_offset = header_size
+            + (*header).data_len
+            + (*header).rodata_len
+            + (*header).text_len
+            + (*header).functions * 6; // Each function data struct is 6 bytes.
+
+        let mut relocated_calls = Vec::new();
+        let function_relocations_data = &prog[function_relocations_offset as usize..];
+        println!("Processing {} relocated calls...", function_relocations_data.len() / 8);
+        for i in 0..(function_relocations_data.len() / 8) {
+            // Each of the relocation structs is 8 bytes long
+            let reloc = function_relocations_data[i*8 as usize..(i*8 + 8) as usize].as_ptr()
+                as *const FunctionRelocation;
+            println!("Relocation call found: {:?}", *reloc);
+            relocated_calls.push(*reloc.clone())
+        }
         return Program {
             text_section_offset: text_offset as usize,
             data_section_offset: data_offset as usize,
             rodata_section_offset: rodata_offset as usize,
             prog_len: (*header).text_len as usize,
+            relocated_calls,
         };
     }
 }
@@ -123,6 +147,8 @@ pub fn execute_program(
             "Error: No program set, call prog_set() to load one",
         ))?,
     };
+
+    let mut return_address_stack = vec![];
     let stack = vec![0u8; ebpf::STACK_SIZE];
 
     // R1 points to beginning of memory area, R10 to stack
@@ -158,6 +184,7 @@ pub fn execute_program(
     // The starting instruction pointer isn't the start of the program. It is
     // the start of the .text section.
     let program = extract_instr_ptr(prog);
+    println!("Relocated calls: {:?}", program.relocated_calls);
     let prog_text = &prog[program.text_section_offset..];
     while insn_ptr * ebpf::INSN_SIZE < prog.len() {
         let insn = ebpf::get_insn(prog_text, insn_ptr);
@@ -678,8 +705,19 @@ pub fn execute_program(
             // Do not delegate the check to the verifier, since registered functions can be
             // changed after the program has been verified.
             ebpf::CALL => {
+                println!("Call at instruction: {}", insn_ptr as i32 - 1);
                 if let Some(function) = helpers.get(&(insn.imm as u32)) {
                     reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
+                } else if let Some(reloc) = program
+                    .relocated_calls
+                    .iter()
+                    .find(|r| r.instruction_offset / 8 == insn_ptr as u32 - 1)
+                {
+                    // If we call a helper function we push the next instruction
+                    // into the return address stack and set the instruction
+                    // pointer to wherever the function lives
+                    return_address_stack.push(insn_ptr as u64);
+                    insn_ptr = (reloc.function_text_offset / 8) as usize;
                 } else {
                     Err(Error::new(
                         ErrorKind::Other,
@@ -691,7 +729,13 @@ pub fn execute_program(
                 }
             }
             ebpf::TAIL_CALL => unimplemented!(),
-            ebpf::EXIT => return Ok(reg[0]),
+            ebpf::EXIT => {
+                if return_address_stack.is_empty() {
+                    return Ok(reg[0]);
+                } else {
+                    insn_ptr = return_address_stack.pop().unwrap() as usize;
+                }
+            }
 
             _ => unreachable!(),
         }
