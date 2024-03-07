@@ -1620,6 +1620,28 @@ impl<'a> EbpfVmNoData<'a> {
         self.parent.set_verifier(verifier)
     }
 
+    /// Override the interpreter used by the VM. It is used to make the VM
+    /// compatible with eBPF programs that contain more that just the .text
+    /// section extracted out of the binary.
+    /// # Examples
+    ///
+    /// ```
+    /// use rbpf::ebpf;
+    ///
+    /// let prog1 = &[
+    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    /// ];
+    ///
+    /// // Instantiate a VM.
+    /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog1)).unwrap();
+    /// // Override the interpreter.
+    /// vm.override_interpreter(rbpf::InterpreterVariant::Extended);
+    /// ```
+    pub fn override_interpreter(&mut self, interpreter_variant: InterpreterVariant) {
+        self.parent.override_interpreter(interpreter_variant);
+    }
+
     /// Register a built-in or user-defined helper function in order to use it later from within
     /// the eBPF program. The helper is registered into a hashmap, so the `key` can be any `u32`.
     ///

@@ -5,12 +5,6 @@
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
-use crate::stdlib::println;
-use stdlib::collections::{BTreeMap, Vec};
-use stdlib::{Error, ErrorKind};
-
-use ebpf;
-
 //! Module provides an alternative implementation of the eBPF program interpreter.
 //! The interpreter is an extension of the one used by Femto-Containers
 //! <https://github.com/future-proof-iot/middleware2022-femtocontainers/tree/main>
@@ -20,6 +14,12 @@ use ebpf;
 //! sections. It also provides infromation about the relocated function calls and
 //! so it supports programs with not-intlined, not-static functions being called
 //! by the main function.
+use crate::stdlib::println;
+use stdlib::collections::{BTreeMap, Vec};
+use stdlib::{Error, ErrorKind};
+
+use ebpf;
+
 
 // Modification here: the programs that we load contain data and rodata sections
 // and thus it is valid to perform memory loads from those sections.
