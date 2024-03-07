@@ -26,15 +26,14 @@
         unreadable_literal
     )
 )]
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate byteorder;
 extern crate combine;
-extern crate time;
+extern crate libm;
 #[cfg(not(feature = "std"))]
 extern crate riot_wrappers;
-extern crate libm;
+extern crate time;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;
@@ -57,21 +56,19 @@ include!("./without_std.rs");
 include!("./with_alloc.rs");
 
 mod stdlib {
+    #[cfg(not(feature = "std"))]
+    pub use crate::with_alloc::*;
     #[cfg(feature = "std")]
     pub use crate::with_std::*;
     #[cfg(not(feature = "std"))]
     pub use crate::without_std::*;
-    #[cfg(not(feature = "std"))]
-    pub use crate::with_alloc::*;
 }
 
-
-use stdlib::collections::Vec;
-use stdlib::collections::BTreeMap;
 use byteorder::{ByteOrder, LittleEndian};
-use stdlib::{Error, ErrorKind};
+use stdlib::collections::BTreeMap;
+use stdlib::collections::Vec;
 use stdlib::u32;
-
+use stdlib::{Error, ErrorKind};
 
 #[cfg(std)]
 mod asm_parser;
@@ -84,9 +81,31 @@ pub mod ebpf;
 pub mod helpers;
 pub mod insn_builder;
 mod interpreter;
+mod interpreter_extended;
 #[cfg(jit)]
 mod jit;
 mod verifier;
+
+/// Specifies the available variants of the interpreters that are used to execute
+/// the eBPF programs.
+pub enum InterpreterVariant {
+    /// The default interpreter used by rbpf. It expects that the program only contains
+    /// the .text section from the compiled ELF file and that the first instruction
+    /// of the program is located at the beginning of the binary. It doesn't support
+    /// .data or .rodata sections and there is no support for function relocations.
+    Default,
+    /// The extended interpreter based on Femto-Containers
+    /// <https://github.com/future-proof-iot/middleware2022-femtocontainers/tree/main>
+    /// This version of the interpreter expects that the loaded program contains
+    /// first a header section specifying the lengths of the other sections
+    /// present in the binary. The header is then followed by .data, .rodata,
+    /// .text sections in order. After that the binary contains the function call
+    /// relocation metadata. This version of the interpreter supports accessing
+    /// data from the .rodata section. This means that programs containing
+    /// string literals work fine. It also supports not-inlined and not-static
+    /// function call relocations.
+    Extended,
+}
 
 /// eBPF verification function that returns an error if the program does not meet its requirements.
 ///
@@ -151,6 +170,7 @@ pub struct EbpfVmMbuff<'a> {
     #[cfg(feature = "cranelift")]
     cranelift_prog: Option<cranelift::CraneliftProgram>,
     helpers: BTreeMap<u32, ebpf::Helper>,
+    interpreter_variant: InterpreterVariant,
 }
 
 impl<'a> EbpfVmMbuff<'a> {
@@ -182,6 +202,7 @@ impl<'a> EbpfVmMbuff<'a> {
             #[cfg(feature = "cranelift")]
             cranelift_prog: None,
             helpers: BTreeMap::new(),
+            interpreter_variant: InterpreterVariant::Default,
         })
     }
 
@@ -246,6 +267,28 @@ impl<'a> EbpfVmMbuff<'a> {
         }
         self.verifier = verifier;
         Ok(())
+    }
+
+    /// Override the interpreter used by the VM. It is used to make the VM
+    /// compatible with eBPF programs that contain more that just the .text
+    /// section extracted out of the binary.
+    /// # Examples
+    ///
+    /// ```
+    /// use rbpf::ebpf;
+    ///
+    /// let prog1 = &[
+    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    /// ];
+    ///
+    /// // Instantiate a VM.
+    /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog1)).unwrap();
+    /// // Override the interpreter.
+    /// vm.override_interpreter(rbpf::InterpreterVariant::Extended);
+    /// ```
+    pub fn override_interpreter(&mut self, interpreter_variant: InterpreterVariant) {
+        self.interpreter_variant = interpreter_variant
     }
 
     /// Register a built-in or user-defined helper function in order to use it later from within
@@ -325,7 +368,14 @@ impl<'a> EbpfVmMbuff<'a> {
     /// assert_eq!(res, 0x2211);
     /// ```
     pub fn execute_program(&self, mem: &[u8], mbuff: &[u8]) -> Result<u64, Error> {
-        interpreter::execute_program(self.prog, mem, mbuff, &self.helpers)
+        match self.interpreter_variant {
+            InterpreterVariant::Default => {
+                interpreter::execute_program(self.prog, mem, mbuff, &self.helpers)
+            }
+            InterpreterVariant::Extended => {
+                interpreter_extended::execute_program(self.prog, mem, mbuff, &self.helpers)
+            }
+        }
     }
 
     /// JIT-compile the loaded program. No argument required for this.
@@ -740,6 +790,28 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// ```
     pub fn set_verifier(&mut self, verifier: Verifier) -> Result<(), Error> {
         self.parent.set_verifier(verifier)
+    }
+
+    /// Override the interpreter used by the VM. It is used to make the VM
+    /// compatible with eBPF programs that contain more that just the .text
+    /// section extracted out of the binary.
+    /// # Examples
+    ///
+    /// ```
+    /// use rbpf::ebpf;
+    ///
+    /// let prog1 = &[
+    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    /// ];
+    ///
+    /// // Instantiate a VM.
+    /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog1)).unwrap();
+    /// // Override the interpreter.
+    /// vm.override_interpreter(rbpf::InterpreterVariant::Extended);
+    /// ```
+    pub fn override_interpreter(&mut self, interpreter_variant: InterpreterVariant) {
+        self.parent.override_interpreter(interpreter_variant);
     }
 
     /// Register a built-in or user-defined helper function in order to use it later from within
@@ -1179,6 +1251,28 @@ impl<'a> EbpfVmRaw<'a> {
     /// ```
     pub fn set_verifier(&mut self, verifier: Verifier) -> Result<(), Error> {
         self.parent.set_verifier(verifier)
+    }
+
+    /// Override the interpreter used by the VM. It is used to make the VM
+    /// compatible with eBPF programs that contain more that just the .text
+    /// section extracted out of the binary.
+    /// # Examples
+    ///
+    /// ```
+    /// use rbpf::ebpf;
+    ///
+    /// let prog1 = &[
+    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    /// ];
+    ///
+    /// // Instantiate a VM.
+    /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog1)).unwrap();
+    /// // Override the interpreter.
+    /// vm.override_interpreter(rbpf::InterpreterVariant::Extended);
+    /// ```
+    pub fn override_interpreter(&mut self, interpreter_variant: InterpreterVariant) {
+        self.parent.override_interpreter(interpreter_variant);
     }
 
     /// Register a built-in or user-defined helper function in order to use it later from within
