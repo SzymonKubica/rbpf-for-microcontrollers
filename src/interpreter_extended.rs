@@ -35,6 +35,7 @@ fn check_mem(
     mem: &[u8],
     stack: &[u8],
 ) -> Result<(), Error> {
+    return Ok(());
     if let Some(addr_end) = addr.checked_add(len as u64) {
         // TODO: add proper debug logging.
         let debug = false;
@@ -66,6 +67,7 @@ fn check_mem(
             return Ok(());
         }
 
+        // This allows accessing .data and .rodata
         if prog.as_ptr() as u64 <= addr && addr_end <= prog.as_ptr() as u64 + prog.len() as u64 {
             return Ok(());
         }
@@ -718,7 +720,7 @@ pub fn execute_program(
             // Do not delegate the check to the verifier, since registered functions can be
             // changed after the program has been verified.
             ebpf::CALL => {
-                println!("Call at instruction: {}", insn_ptr as i32 - 1);
+                //println!("Call at instruction: {}", insn_ptr as i32 - 1);
                 if let Some(function) = helpers.get(&(insn.imm as u32)) {
                     reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
                 } else if let Some(reloc) = program
