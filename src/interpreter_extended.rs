@@ -15,6 +15,7 @@
 //! so it supports programs with not-intlined, not-static functions being called
 //! by the main function.
 use crate::stdlib::println;
+use crate::verifier::check_helpers;
 use stdlib::collections::{BTreeMap, Vec};
 use stdlib::{Error, ErrorKind};
 
@@ -162,6 +163,9 @@ pub fn execute_program(
             "Error: No program set, call prog_set() to load one",
         ))?,
     };
+
+    // Check if allowed helpers are correct
+    check_helpers(prog, helpers)?;
 
     let mut return_address_stack = vec![];
     let stack = vec![0u8; ebpf::STACK_SIZE];

@@ -18,6 +18,7 @@
 //
 // Contrary to the verifier of the Linux kernel, this one does not modify the bytecode at all.
 
+use alloc::collections::BTreeMap;
 use ebpf;
 use stdlib::{println, Error, ErrorKind};
 
@@ -145,6 +146,34 @@ fn extract_instr_ptr(prog: &[u8]) -> Program {
             prog_len: (*header).text_len as usize,
         };
     }
+}
+
+pub fn check_helpers(
+    prog: &[u8],
+    available_helpers: &BTreeMap<u32, ebpf::Helper>,
+) -> Result<(), Error> {
+    let program = extract_instr_ptr(prog);
+    let mut insn_ptr: usize = 0;
+
+    let prog_text = &prog[program.text_section_offset..];
+
+    while insn_ptr * ebpf::INSN_SIZE < program.prog_len {
+        let insn = ebpf::get_insn(prog_text, insn_ptr);
+
+        match insn.opc {
+            ebpf::CALL => {
+                if !available_helpers.keys().any(|&i| i == insn.imm as u32) {
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        format!("Unknown helper function with id: {}", insn.imm),
+                    ))?;
+                }
+            }
+            _ => {}
+        };
+        insn_ptr += 1;
+    }
+    Ok(())
 }
 
 pub fn check(prog: &[u8]) -> Result<(), Error> {
@@ -398,6 +427,7 @@ pub fn check(prog: &[u8]) -> Result<(), Error> {
                 check_jmp_offset(prog_text, insn_ptr)?;
             }
 
+            // We can modify here to check for function calls.
             ebpf::CALL => {}
             ebpf::TAIL_CALL => {
                 unimplemented!()
