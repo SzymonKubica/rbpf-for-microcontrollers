@@ -737,6 +737,12 @@ pub fn execute_program(
                     // pointer to wherever the function lives
                     return_address_stack.push(insn_ptr as u64);
                     insn_ptr = (reloc.function_text_offset / 8) as usize;
+                } else if insn.src == 1 {
+                    // Here the source register 1 indicates that we are making
+                    // a call relative to the current instruction pointer
+                    return_address_stack.push(insn_ptr as u64);
+                    insn_ptr = ((insn_ptr as i32 + insn.imm) as usize) as usize;
+
                 } else {
                     Err(Error::new(
                         ErrorKind::Other,

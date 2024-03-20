@@ -162,7 +162,11 @@ pub fn check_helpers(
 
         match insn.opc {
             ebpf::CALL => {
-                if !available_helpers.keys().any(|&i| i == insn.imm as u32) {
+                println!("CALL instruction: {:?}", insn);
+                // Setting src to 1 in the CALL instruction indicates that a
+                // local function needs to be called by offsetting the instruction
+                // pointer relative to the current value
+                if insn.src != 1 && !available_helpers.keys().any(|&i| i == insn.imm as u32) {
                     return Err(Error::new(
                         ErrorKind::Other,
                         format!("Unknown helper function with id: {}", insn.imm),
