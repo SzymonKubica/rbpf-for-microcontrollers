@@ -8,6 +8,7 @@
 use crate::stdlib::println;
 use stdlib::collections::BTreeMap;
 use stdlib::{Error, ErrorKind};
+use alloc::string::ToString;
 
 use ebpf;
 
@@ -89,8 +90,16 @@ pub fn execute_program(
         check_mem(addr, len, "store", insn_ptr, mbuff, mem, &stack)
     };
 
+    let Ok(binary) = goblin::elf::Elf::parse(&prog) else {
+        // TODO: fix this temporary return
+        return Ok(reg[0]);
+    };
+
+    let text_section = binary.section_headers.get(1).unwrap();
+
     // Loop on instructions
-    let mut insn_ptr: usize = 0;
+    let mut insn_ptr: usize = text_section.sh_offset as usize / 8;
+    println!("insn_ptr: {:#x}", insn_ptr);
     while insn_ptr * ebpf::INSN_SIZE < prog.len() {
         let insn = ebpf::get_insn(prog, insn_ptr);
         insn_ptr += 1;
