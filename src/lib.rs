@@ -82,6 +82,7 @@ pub mod helpers;
 pub mod insn_builder;
 mod interpreter;
 mod interpreter_extended;
+mod interpreter_raw_elf_file;
 #[cfg(jit)]
 mod jit;
 mod verifier;
@@ -105,6 +106,10 @@ pub enum InterpreterVariant {
     /// string literals work fine. It also supports not-inlined and not-static
     /// function call relocations.
     Extended,
+    /// The interpreter operating on raw ELF files that have already had relocations
+    /// applied to them. It uses the `goblin` elf parser to extract the first
+    /// instruction in the program.
+    RawElfFile,
 }
 
 /// eBPF verification function that returns an error if the program does not meet its requirements.
@@ -374,6 +379,9 @@ impl<'a> EbpfVmMbuff<'a> {
             }
             InterpreterVariant::Extended => {
                 interpreter_extended::execute_program(self.prog, mem, mbuff, &self.helpers)
+            }
+            InterpreterVariant::RawElfFile => {
+                interpreter_raw_elf_file::execute_program(self.prog, mem, mbuff, &self.helpers)
             }
         }
     }
