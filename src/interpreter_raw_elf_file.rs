@@ -6,9 +6,9 @@
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
 use crate::stdlib::println;
+use alloc::string::ToString;
 use stdlib::collections::BTreeMap;
 use stdlib::{Error, ErrorKind};
-use alloc::string::ToString;
 
 use ebpf;
 
@@ -95,6 +95,7 @@ pub fn execute_program(
         return Ok(reg[0]);
     };
 
+    let mut return_address_stack = vec![];
     let text_section = binary.section_headers.get(1).unwrap();
 
     // Loop on instructions
@@ -595,17 +596,29 @@ pub fn execute_program(
             // Do not delegate the check to the verifier, since registered functions can be
             // changed after the program has been verified.
             ebpf::CALL => {
-                if let Some(function) = helpers.get(&(insn.imm as u32)) {
-                    reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
-                } else {
-                    Err(Error::new(
-                        ErrorKind::Other,
-                        format!(
-                            "Error: unknown helper function (id: {:#x})",
-                            insn.imm as u32
-                        ),
-                    ))?;
-                }
+                // The source register determines if we have a helper call or a PC-relative call.
+                match insn.src {
+                    0 => {
+                        if let Some(function) = helpers.get(&(insn.imm as u32)) {
+                            reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
+                        } else {
+                            Err(Error::new(
+                                ErrorKind::Other,
+                                format!(
+                                    "Error: unknown helper function (id: {:#x})",
+                                    insn.imm as u32
+                                ),
+                            ))?;
+                        }
+                    }
+                    1 => {
+                        // Here the source register 1 indicates that we are making
+                        // a call relative to the current instruction pointer
+                        return_address_stack.push(insn_ptr as u64);
+                        insn_ptr = ((insn_ptr as i32 + insn.imm) as usize) as usize;
+                    }
+                    _ => unreachable!(),
+                };
             }
             ebpf::TAIL_CALL => unimplemented!(),
             ebpf::EXIT => return Ok(reg[0]),
