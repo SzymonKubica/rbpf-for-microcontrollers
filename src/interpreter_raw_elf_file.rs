@@ -100,7 +100,6 @@ pub fn execute_program(
 
     // Loop on instructions
     let mut insn_ptr: usize = text_section.sh_offset as usize / 8;
-    println!("insn_ptr: {:#x}", insn_ptr);
     while insn_ptr * ebpf::INSN_SIZE < prog.len() {
         let insn = ebpf::get_insn(prog, insn_ptr);
         insn_ptr += 1;
@@ -617,11 +616,34 @@ pub fn execute_program(
                         return_address_stack.push(insn_ptr as u64);
                         insn_ptr = ((insn_ptr as i32 + insn.imm) as usize) as usize;
                     }
+                    3 => {
+                        // This is a hacky implementation of calling functions
+                        // using their actual memory address (not specified in the
+                        // eBPF standard). Those calls are denoted by value 3
+                        // being present in the source register. The reason we
+                        // need those is when we want to have non-inlined, non-static
+                        // functions defined inside of eBPF programs. Calls to those
+                        // functions aren't compiled as PC-relative calls and
+                        // they need manual relocation resolution
+
+                        return_address_stack.push(insn_ptr as u64);
+                        let function_address = insn.imm as u32;
+                        let program_address = prog.as_ptr() as u32;
+                        let function_offset =
+                            function_address - program_address as u32;
+                        insn_ptr = (function_offset / 8) as usize;
+                    }
                     _ => unreachable!(),
                 };
             }
             ebpf::TAIL_CALL => unimplemented!(),
-            ebpf::EXIT => return Ok(reg[0]),
+            ebpf::EXIT => {
+                if return_address_stack.is_empty() {
+                    return Ok(reg[0]);
+                } else {
+                    insn_ptr = return_address_stack.pop().unwrap() as usize;
+                }
+            }
 
             _ => unreachable!(),
         }
