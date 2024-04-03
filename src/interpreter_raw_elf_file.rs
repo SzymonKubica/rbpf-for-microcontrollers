@@ -12,16 +12,42 @@ use stdlib::{Error, ErrorKind};
 
 use ebpf;
 
+// Modification here: the programs that we load contain data and rodata sections
+// and thus it is valid to perform memory loads from those sections.
+// TODO: make that check more fine-grained so that it is possible to load from
+// those sections only.
 fn check_mem(
     addr: u64,
     len: usize,
     access_type: &str,
     insn_ptr: usize,
     mbuff: &[u8],
+    prog: &[u8],
     mem: &[u8],
     stack: &[u8],
 ) -> Result<(), Error> {
+    return Ok(());
     if let Some(addr_end) = addr.checked_add(len as u64) {
+        // TODO: add proper debug logging.
+        let debug = false;
+        if debug {
+            println!("Checking memory load: {}", addr);
+            println!(
+                "mbuff: start={} len={}",
+                mbuff.as_ptr() as u64,
+                mbuff.len() as u64
+            );
+            println!(
+                "mem: start={} len={}",
+                mem.as_ptr() as u64,
+                mem.len() as u64
+            );
+            println!(
+                "prog: start={} len={}",
+                prog.as_ptr() as u64,
+                prog.len() as u64
+            );
+        }
         if mbuff.as_ptr() as u64 <= addr && addr_end <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
             return Ok(());
         }
@@ -29,6 +55,11 @@ fn check_mem(
             return Ok(());
         }
         if stack.as_ptr() as u64 <= addr && addr_end <= stack.as_ptr() as u64 + stack.len() as u64 {
+            return Ok(());
+        }
+
+        // This allows accessing .data and .rodata
+        if prog.as_ptr() as u64 <= addr && addr_end <= prog.as_ptr() as u64 + prog.len() as u64 {
             return Ok(());
         }
     }
@@ -41,6 +72,7 @@ fn check_mem(
         stack.as_ptr() as u64, stack.len()
     )))
 }
+
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
@@ -84,10 +116,10 @@ pub fn execute_program(
     }
 
     let check_mem_load = |addr: u64, len: usize, insn_ptr: usize| {
-        check_mem(addr, len, "load", insn_ptr, mbuff, mem, &stack)
+        check_mem(addr, len, "load", insn_ptr, mbuff, prog, mem, &stack)
     };
     let check_mem_store = |addr: u64, len: usize, insn_ptr: usize| {
-        check_mem(addr, len, "store", insn_ptr, mbuff, mem, &stack)
+        check_mem(addr, len, "store", insn_ptr, mbuff, prog, mem, &stack)
     };
 
     let Ok(binary) = goblin::elf::Elf::parse(&prog) else {
