@@ -84,16 +84,14 @@ fn check_mem(
     )))
 }
 
-#[derive(Copy, Clone, Debug)]
 struct BytecodeHeader {
     magic: u32,   /*Magic number */
     version: u32, /*Version of the application */
     flags: u32,
-    data_len: u32,        /*Length of the data section */
-    rodata_len: u32,      /*Length of the rodata section */
-    text_len: u32,        /*Length of the text section */
-    functions: u32,       /*Number of functions available */
-    relocated_calls: u32, /*Number of relocated function calls in the program */
+    data_len: u32,   /*Length of the data section */
+    rodata_len: u32, /*Length of the rodata section */
+    text_len: u32,   /*Length of the text section */
+    functions: u32,  /*Number of functions available */
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -108,18 +106,12 @@ struct Program {
     rodata_section_offset: usize,
     prog_len: usize,
     relocated_calls: Vec<FunctionRelocation>,
-    allowed_helpers: Vec<u8>,
 }
 
-static FUNCTION_STRUCT_SIZE: u32 = 6;
-static RELOCATED_CALL_STRUCT_SIZE: u32 = 8;
-
 fn parse_header(prog: &[u8]) -> Program {
-    let header_size = 32;
+    let header_size = 28;
     unsafe {
         let header = prog.as_ptr() as *const BytecodeHeader;
-
-        println!("Header: \n{:?}", *header);
 
         let text_offset = header_size + (*header).data_len + (*header).rodata_len;
         let data_offset = header_size;
@@ -128,9 +120,7 @@ fn parse_header(prog: &[u8]) -> Program {
             + (*header).data_len
             + (*header).rodata_len
             + (*header).text_len
-            + (*header).functions * FUNCTION_STRUCT_SIZE;
-
-        let allowed_helpers_offset: u32 = function_relocations_offset + (*header).relocated_calls * RELOCATED_CALL_STRUCT_SIZE;
+            + (*header).functions * 6; // Each function data struct is 6 bytes.
 
         let mut relocated_calls = Vec::new();
         let function_relocations_data = &prog[function_relocations_offset as usize..];
@@ -145,19 +135,12 @@ fn parse_header(prog: &[u8]) -> Program {
             println!("Relocation call found: {:?}", *reloc);
             relocated_calls.push(*reloc.clone())
         }
-
-        let mut allowed_helpers = Vec::new();
-        for byte in &prog[allowed_helpers_offset as usize..] {
-            println!("Allowed helper found: {}", byte);
-            allowed_helpers.push(*byte);
-        }
         return Program {
             text_section_offset: text_offset as usize,
             data_section_offset: data_offset as usize,
             rodata_section_offset: rodata_offset as usize,
             prog_len: (*header).text_len as usize,
             relocated_calls,
-            allowed_helpers,
         };
     }
 }

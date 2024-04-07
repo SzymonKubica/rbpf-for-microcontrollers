@@ -82,6 +82,7 @@ pub mod helpers;
 pub mod insn_builder;
 mod interpreter;
 mod interpreter_extended;
+mod interpreter_femtocontainers_header;
 mod interpreter_raw_elf_file;
 #[cfg(jit)]
 mod jit;
@@ -105,7 +106,16 @@ pub enum InterpreterVariant {
     /// data from the .rodata section. This means that programs containing
     /// string literals work fine. It also supports not-inlined and not-static
     /// function call relocations.
-    Extended,
+    /// It introduces additional instructions to the ISA that weren't included
+    /// originally in the eBPF specification: LDDWD and LDDWR which represent
+    /// double-word load instructions where the immediate isn't a raw memory
+    /// access rather it specifies the offset from the start of the .data or
+    /// .rodata section.
+    FemtoContainersHeader,
+    /// An improvement of the FemtoContainersHeader interpreter, this one
+    /// uses a custom header which allows for specifying the IDs of the helper
+    /// functions that can be used by the program.
+    ExtendedHeader,
     /// The interpreter operating on raw ELF files that have already had relocations
     /// applied to them. It uses the `goblin` elf parser to extract the first
     /// instruction in the program.
@@ -377,7 +387,15 @@ impl<'a> EbpfVmMbuff<'a> {
             InterpreterVariant::Default => {
                 interpreter::execute_program(self.prog, mem, mbuff, &self.helpers)
             }
-            InterpreterVariant::Extended => {
+            InterpreterVariant::FemtoContainersHeader => {
+                interpreter_femtocontainers_header::execute_program(
+                    self.prog,
+                    mem,
+                    mbuff,
+                    &self.helpers,
+                )
+            }
+            InterpreterVariant::ExtendedHeader => {
                 interpreter_extended::execute_program(self.prog, mem, mbuff, &self.helpers)
             }
             InterpreterVariant::RawElfFile => {
@@ -816,7 +834,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// // Instantiate a VM.
     /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog1)).unwrap();
     /// // Override the interpreter.
-    /// vm.override_interpreter(rbpf::InterpreterVariant::Extended);
+    /// vm.override_interpreter(rbpf::InterpreterVariant::ExtendedHeader);
     /// ```
     pub fn override_interpreter(&mut self, interpreter_variant: InterpreterVariant) {
         self.parent.override_interpreter(interpreter_variant);
