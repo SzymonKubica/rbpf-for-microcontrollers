@@ -5,8 +5,8 @@
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
-use crate::stdlib::println;
 use alloc::string::ToString;
+use log::debug;
 use stdlib::collections::BTreeMap;
 use stdlib::{Error, ErrorKind};
 
@@ -28,26 +28,22 @@ fn check_mem(
 ) -> Result<(), Error> {
     return Ok(());
     if let Some(addr_end) = addr.checked_add(len as u64) {
-        // TODO: add proper debug logging.
-        let debug = false;
-        if debug {
-            println!("Checking memory load: {}", addr);
-            println!(
-                "mbuff: start={} len={}",
-                mbuff.as_ptr() as u64,
-                mbuff.len() as u64
-            );
-            println!(
-                "mem: start={} len={}",
-                mem.as_ptr() as u64,
-                mem.len() as u64
-            );
-            println!(
-                "prog: start={} len={}",
-                prog.as_ptr() as u64,
-                prog.len() as u64
-            );
-        }
+        debug!("Checking memory load: {}", addr);
+        debug!(
+            "mbuff: start={} len={}",
+            mbuff.as_ptr() as u64,
+            mbuff.len() as u64
+        );
+        debug!(
+            "mem: start={} len={}",
+            mem.as_ptr() as u64,
+            mem.len() as u64
+        );
+        debug!(
+            "prog: start={} len={}",
+            prog.as_ptr() as u64,
+            prog.len() as u64
+        );
         if mbuff.as_ptr() as u64 <= addr && addr_end <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
             return Ok(());
         }
@@ -72,7 +68,6 @@ fn check_mem(
         stack.as_ptr() as u64, stack.len()
     )))
 }
-
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
@@ -661,8 +656,7 @@ pub fn execute_program(
                         return_address_stack.push(insn_ptr as u64);
                         let function_address = insn.imm as u32;
                         let program_address = prog.as_ptr() as u32;
-                        let function_offset =
-                            function_address - program_address as u32;
+                        let function_offset = function_address - program_address as u32;
                         insn_ptr = (function_offset / 8) as usize;
                     }
                     _ => unreachable!(),

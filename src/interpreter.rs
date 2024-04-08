@@ -5,7 +5,6 @@
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
-use crate::stdlib::println;
 use stdlib::collections::BTreeMap;
 use stdlib::{Error, ErrorKind};
 

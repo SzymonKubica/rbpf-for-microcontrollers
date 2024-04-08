@@ -31,9 +31,10 @@
 extern crate byteorder;
 extern crate combine;
 extern crate libm;
-#[cfg(not(feature = "std"))]
-extern crate riot_wrappers;
+extern crate log;
 extern crate time;
+extern crate alloc;
+extern crate core;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;
@@ -90,6 +91,7 @@ mod verifier;
 
 /// Specifies the available variants of the interpreters that are used to execute
 /// the eBPF programs.
+#[derive(Clone, Copy, Debug)]
 pub enum InterpreterVariant {
     /// The default interpreter used by rbpf. It expects that the program only contains
     /// the .text section from the compiled ELF file and that the first instruction
@@ -119,7 +121,7 @@ pub enum InterpreterVariant {
     /// The interpreter operating on raw ELF files that have already had relocations
     /// applied to them. It uses the `goblin` elf parser to extract the first
     /// instruction in the program.
-    RawElfFile,
+    RawObjectFile,
 }
 
 /// eBPF verification function that returns an error if the program does not meet its requirements.
@@ -204,20 +206,33 @@ impl<'a> EbpfVmMbuff<'a> {
     /// // Instantiate a VM.
     /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog)).unwrap();
     /// ```
-    pub fn new(prog: Option<&'a [u8]>) -> Result<EbpfVmMbuff<'a>, Error> {
+    pub fn new(
+        prog: Option<&'a [u8]>,
+        interpreter_variant: InterpreterVariant,
+    ) -> Result<EbpfVmMbuff<'a>, Error> {
         if let Some(prog) = prog {
-            verifier::check(prog)?;
+            verifier::check(prog, interpreter_variant)?;
         }
+
+        // We need to dynamically define the verifier in this way as the
+        // closures aren't allowed to capture the interpreter variant from the
+        // environment.
+        let verifier: fn(prog: &[u8]) -> Result<(), Error> = match interpreter_variant {
+            InterpreterVariant::Default => |prog| verifier::check(prog, InterpreterVariant::Default),
+            InterpreterVariant::FemtoContainersHeader => |prog| verifier::check(prog, InterpreterVariant::FemtoContainersHeader),
+            InterpreterVariant::ExtendedHeader => |prog| verifier::check(prog, InterpreterVariant::ExtendedHeader),
+            InterpreterVariant::RawObjectFile => |prog| verifier::check(prog, InterpreterVariant::RawObjectFile),
+        };
 
         Ok(EbpfVmMbuff {
             prog,
-            verifier: verifier::check,
+            verifier,
             #[cfg(jit)]
             jit: None,
             #[cfg(feature = "cranelift")]
             cranelift_prog: None,
             helpers: BTreeMap::new(),
-            interpreter_variant: InterpreterVariant::Default,
+            interpreter_variant,
         })
     }
 
@@ -398,7 +413,7 @@ impl<'a> EbpfVmMbuff<'a> {
             InterpreterVariant::ExtendedHeader => {
                 interpreter_extended::execute_program(self.prog, mem, mbuff, &self.helpers)
             }
-            InterpreterVariant::RawElfFile => {
+            InterpreterVariant::RawObjectFile => {
                 interpreter_raw_elf_file::execute_program(self.prog, mem, mbuff, &self.helpers)
             }
         }
@@ -725,8 +740,9 @@ impl<'a> EbpfVmFixedMbuff<'a> {
         prog: Option<&'a [u8]>,
         data_offset: usize,
         data_end_offset: usize,
+        interpreter_variant: InterpreterVariant,
     ) -> Result<EbpfVmFixedMbuff<'a>, Error> {
-        let parent = EbpfVmMbuff::new(prog)?;
+        let parent = EbpfVmMbuff::new(prog, interpreter_variant)?;
         let get_buff_len = |x: usize, y: usize| if x >= y { x + 8 } else { y + 8 };
         let buffer = vec![0u8; get_buff_len(data_offset, data_end_offset)];
         let mbuff = MetaBuff {
@@ -1209,8 +1225,11 @@ impl<'a> EbpfVmRaw<'a> {
     /// // Instantiate a VM.
     /// let vm = rbpf::EbpfVmRaw::new(Some(prog)).unwrap();
     /// ```
-    pub fn new(prog: Option<&'a [u8]>) -> Result<EbpfVmRaw<'a>, Error> {
-        let parent = EbpfVmMbuff::new(prog)?;
+    pub fn new(
+        prog: Option<&'a [u8]>,
+        interpreter_variant: InterpreterVariant,
+    ) -> Result<EbpfVmRaw<'a>, Error> {
+        let parent = EbpfVmMbuff::new(prog, interpreter_variant)?;
         Ok(EbpfVmRaw { parent })
     }
 
@@ -1577,8 +1596,11 @@ impl<'a> EbpfVmNoData<'a> {
     /// // Instantiate a VM.
     /// let vm = rbpf::EbpfVmNoData::new(Some(prog));
     /// ```
-    pub fn new(prog: Option<&'a [u8]>) -> Result<EbpfVmNoData<'a>, Error> {
-        let parent = EbpfVmRaw::new(prog)?;
+    pub fn new(
+        prog: Option<&'a [u8]>,
+        interpreter_variant: InterpreterVariant,
+    ) -> Result<EbpfVmNoData<'a>, Error> {
+        let parent = EbpfVmRaw::new(prog, interpreter_variant)?;
         Ok(EbpfVmNoData { parent })
     }
 

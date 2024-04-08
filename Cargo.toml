@@ -27,9 +27,10 @@ include = [
 combine = { version = "4.6", default-features = false}
 time = { version = "0.2", default-features = false }
 byteorder = { version = "1.2", default-features = false }
-riot-wrappers = { version = "0.8", features = [ "set_panic_handler" ] }
 goblin = {version = "0.8.0", default_features = false , features = ["elf32", "elf64", "endian_fd"]}
 libm = "0.2.8"
+log = "0.4.21"
+
 
 # Optional Dependencies for the CraneLift JIT
 cranelift-codegen = { version = "0.99", optional = true }

@@ -3,8 +3,6 @@ pub mod without_std {
     use alloc::string::String;
     pub use core::u32;
     pub use core::u64;
-    // Adapt this with whatever printing functionality your host OS requires.
-    pub use riot_wrappers::println;
 
     /// Dummy implementation of Error for no std.
     /// It ensures that the existing code can use it with the same interface

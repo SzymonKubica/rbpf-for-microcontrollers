@@ -16,8 +16,9 @@
 //! by the main function.
 use core::ffi::c_void;
 
-use crate::stdlib::println;
+use crate::InterpreterVariant;
 use crate::verifier::check_helpers;
+use log::debug;
 use stdlib::collections::{BTreeMap, Vec};
 use stdlib::{Error, ErrorKind};
 
@@ -42,18 +43,18 @@ fn check_mem(
         // TODO: add proper debug logging.
         let debug = false;
         if debug {
-            println!("Checking memory load: {}", addr);
-            println!(
+            debug!("Checking memory load: {}", addr);
+            debug!(
                 "mbuff: start={} len={}",
                 mbuff.as_ptr() as u64,
                 mbuff.len() as u64
             );
-            println!(
+            debug!(
                 "mem: start={} len={}",
                 mem.as_ptr() as u64,
                 mem.len() as u64
             );
-            println!(
+            debug!(
                 "prog: start={} len={}",
                 prog.as_ptr() as u64,
                 prog.len() as u64
@@ -124,7 +125,7 @@ fn parse_header(prog: &[u8]) -> Program {
 
         let mut relocated_calls = Vec::new();
         let function_relocations_data = &prog[function_relocations_offset as usize..];
-        println!(
+        debug!(
             "Processing {} relocated calls...",
             function_relocations_data.len() / 8
         );
@@ -132,7 +133,7 @@ fn parse_header(prog: &[u8]) -> Program {
             // Each of the relocation structs is 8 bytes long
             let reloc = function_relocations_data[i * 8 as usize..(i * 8 + 8) as usize].as_ptr()
                 as *const FunctionRelocation;
-            println!("Relocation call found: {:?}", *reloc);
+            debug!("Relocation call found: {:?}", *reloc);
             relocated_calls.push(*reloc.clone())
         }
         return Program {
@@ -166,7 +167,8 @@ pub fn execute_program(
     };
 
     // Check if allowed helpers are correct
-    check_helpers(prog, helpers)?;
+    let helper_idxs = helpers.keys().map(|v| *v).collect::<Vec<u32>>();
+    check_helpers(prog, &helper_idxs, InterpreterVariant::FemtoContainersHeader)?;
 
     let mut return_address_stack = vec![];
     let stack = vec![0u8; ebpf::STACK_SIZE];
@@ -204,7 +206,7 @@ pub fn execute_program(
     // The starting instruction pointer isn't the start of the program. It is
     // the start of the .text section.
     let program = parse_header(prog);
-    println!("Relocated calls: {:?}", program.relocated_calls);
+    debug!("Relocated calls: {:?}", program.relocated_calls);
     let prog_text = &prog[program.text_section_offset..];
     while insn_ptr * ebpf::INSN_SIZE < prog.len() {
         let insn = ebpf::get_insn(prog_text, insn_ptr);

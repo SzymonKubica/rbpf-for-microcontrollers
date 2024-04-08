@@ -20,7 +20,11 @@
 
 use alloc::collections::BTreeMap;
 use ebpf;
-use stdlib::{println, Error, ErrorKind};
+use log::debug;
+use stdlib::collections::Vec;
+use stdlib::{Error, ErrorKind};
+
+use crate::InterpreterVariant;
 
 fn reject<S: AsRef<str>>(msg: S) -> Result<(), Error> {
     let full_msg = format!("[Verifier] Error: {}", msg.as_ref());
@@ -120,55 +124,76 @@ struct BytecodeHeader {
     functions: u32,  /*Number of functions available */
 }
 
-struct Program {
-    text_section_offset: usize,
-    prog_len: usize,
+struct SectionHeader {
+    section_offset: usize,
+    section_len: usize,
 }
 
-fn extract_instr_ptr(prog: &[u8]) -> Program {
-    let header_size = 28;
-    unsafe {
-        let header = prog.as_ptr() as *const BytecodeHeader;
-        let debug = false;
-        if debug {
-            println!("Magic: {}", (*header).magic);
-            println!("Version: {}", (*header).version);
-            println!("Flags: {}", (*header).flags);
-            println!("data_len: {}", (*header).data_len);
-            println!("rodata_len: {}", (*header).rodata_len);
-            println!("text_len: {}", (*header).text_len);
-            println!("functions: {}", (*header).functions);
+fn find_text_section(
+    prog: &[u8],
+    interpreter_variant: InterpreterVariant,
+) -> Result<SectionHeader, &'static str> {
+    match interpreter_variant {
+        InterpreterVariant::Default => Ok(SectionHeader {
+            section_offset: 0,
+            section_len: prog.len(),
+        }),
+        InterpreterVariant::FemtoContainersHeader => {
+            let header_size = 28;
+            unsafe {
+                let header = prog.as_ptr() as *const BytecodeHeader;
+                let offset = header_size + (*header).data_len + (*header).rodata_len;
+                Ok(SectionHeader {
+                    section_offset: offset as usize,
+                    section_len: (*header).text_len as usize,
+                })
+            }
         }
-
-        let offset = header_size + (*header).data_len + (*header).rodata_len;
-        return Program {
-            text_section_offset: offset as usize,
-            prog_len: (*header).text_len as usize,
-        };
+        InterpreterVariant::ExtendedHeader => {
+            let header_size = 32;
+            unsafe {
+                let header = prog.as_ptr() as *const BytecodeHeader;
+                let offset = header_size + (*header).data_len + (*header).rodata_len;
+                Ok(SectionHeader {
+                    section_offset: offset as usize,
+                    section_len: (*header).text_len as usize,
+                })
+            }
+        }
+        InterpreterVariant::RawObjectFile => {
+            let Ok(binary) = goblin::elf::Elf::parse(&prog) else {
+                Err("Failed to parse ELF binary")?
+            };
+            let text_section = binary.section_headers.get(1).unwrap();
+            Ok(SectionHeader {
+                section_offset: text_section.sh_offset as usize,
+                section_len: text_section.sh_size as usize,
+            })
+        }
     }
 }
 
 pub fn check_helpers(
     prog: &[u8],
-    available_helpers: &BTreeMap<u32, ebpf::Helper>,
+    available_helpers: &Vec<u32>,
+    interpreter_variant: InterpreterVariant,
 ) -> Result<(), Error> {
-    // TODO: reenable the verifier
-    return Ok(());
-    let program = extract_instr_ptr(prog);
+    let text_section = find_text_section(prog, interpreter_variant)
+        .map_err(|s| Error::new(ErrorKind::Other, s))?;
     let mut insn_ptr: usize = 0;
 
-    let prog_text = &prog[program.text_section_offset..];
+    let prog_text = &prog[text_section.section_offset..];
 
-    while insn_ptr * ebpf::INSN_SIZE < program.prog_len {
+    while insn_ptr * ebpf::INSN_SIZE < text_section.section_len {
         let insn = ebpf::get_insn(prog_text, insn_ptr);
 
         match insn.opc {
             ebpf::CALL => {
-                println!("CALL instruction: {:?}", insn);
+                debug!("CALL instruction: {:?}", insn);
                 // Setting src to 1 in the CALL instruction indicates that a
                 // local function needs to be called by offsetting the instruction
                 // pointer relative to the current value
-                if insn.src != 1 && !available_helpers.keys().any(|&i| i == insn.imm as u32) {
+                if insn.src != 1 && !available_helpers.contains(&(insn.imm as u32)) {
                     return Err(Error::new(
                         ErrorKind::Other,
                         format!("Unknown helper function with id: {}", insn.imm),
@@ -182,16 +207,15 @@ pub fn check_helpers(
     Ok(())
 }
 
-pub fn check(prog: &[u8]) -> Result<(), Error> {
-    // TODO: reenable the verifier
-    return Ok(());
-    let program = extract_instr_ptr(prog);
-    // Disable this check for now
-    //check_prog_len(prog)?;
+pub fn check(prog: &[u8], interpreter_variant: InterpreterVariant) -> Result<(), Error> {
+    let text_section = find_text_section(prog, interpreter_variant)
+        .map_err(|s| Error::new(ErrorKind::Other, s))?;
 
     let mut insn_ptr: usize = 0;
-    let prog_text = &prog[program.text_section_offset..];
-    while insn_ptr * ebpf::INSN_SIZE < program.prog_len {
+    let prog_text = &prog[text_section.section_offset..];
+    // TODO: reenable the verifier
+    //check_prog_len(prog_text)?;
+    while insn_ptr * ebpf::INSN_SIZE < text_section.section_len {
         let insn = ebpf::get_insn(prog_text, insn_ptr);
         let mut store = false;
 
@@ -456,7 +480,7 @@ pub fn check(prog: &[u8]) -> Result<(), Error> {
     }
 
     // insn_ptr should now be equal to number of instructions.
-    if insn_ptr != program.prog_len / ebpf::INSN_SIZE {
+    if insn_ptr != text_section.section_len / ebpf::INSN_SIZE {
         reject(format!("jumped out of code to #{insn_ptr:?}"))?;
     }
 
