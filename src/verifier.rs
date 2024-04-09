@@ -114,7 +114,7 @@ fn check_registers(insn: &ebpf::Insn, store: bool, insn_ptr: usize) -> Result<()
     }
 }
 
-struct BytecodeHeader {
+struct FemtoContainersHeader {
     magic: u32,   /*Magic number */
     version: u32, /*Version of the application */
     flags: u32,
@@ -122,6 +122,17 @@ struct BytecodeHeader {
     rodata_len: u32, /*Length of the rodata section */
     text_len: u32,   /*Length of the text section */
     functions: u32,  /*Number of functions available */
+}
+#[derive(Debug)]
+struct ExtendedHeader {
+    magic: u32,   /*Magic number */
+    version: u32, /*Version of the application */
+    flags: u32,
+    data_len: u32,        /*Length of the data section */
+    rodata_len: u32,      /*Length of the rodata section */
+    text_len: u32,        /*Length of the text section */
+    functions: u32,       /*Number of functions available */
+    relocated_calls: u32, /*Number of relocated calls */
 }
 
 struct SectionHeader {
@@ -141,7 +152,7 @@ fn find_text_section(
         InterpreterVariant::FemtoContainersHeader => {
             let header_size = 28;
             unsafe {
-                let header = prog.as_ptr() as *const BytecodeHeader;
+                let header = prog.as_ptr() as *const FemtoContainersHeader;
                 let offset = header_size + (*header).data_len + (*header).rodata_len;
                 Ok(SectionHeader {
                     section_offset: offset as usize,
@@ -152,7 +163,7 @@ fn find_text_section(
         InterpreterVariant::ExtendedHeader => {
             let header_size = 32;
             unsafe {
-                let header = prog.as_ptr() as *const BytecodeHeader;
+                let header = prog.as_ptr() as *const ExtendedHeader;
                 let offset = header_size + (*header).data_len + (*header).rodata_len;
                 Ok(SectionHeader {
                     section_offset: offset as usize,

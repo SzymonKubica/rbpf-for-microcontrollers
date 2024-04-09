@@ -33,7 +33,9 @@ extern crate combine;
 extern crate libm;
 extern crate log;
 extern crate time;
+#[cfg(feature = "std")]
 extern crate alloc;
+#[cfg(feature = "std")]
 extern crate core;
 
 #[cfg(feature = "cranelift")]
@@ -85,6 +87,8 @@ mod interpreter;
 mod interpreter_extended;
 mod interpreter_femtocontainers_header;
 mod interpreter_raw_elf_file;
+
+pub use verifier::check_helpers;
 #[cfg(jit)]
 mod jit;
 mod verifier;

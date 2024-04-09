@@ -38,7 +38,6 @@ fn check_mem(
     mem: &[u8],
     stack: &[u8],
 ) -> Result<(), Error> {
-    return Ok(());
     if let Some(addr_end) = addr.checked_add(len as u64) {
         // TODO: add proper debug logging.
         let debug = false;
@@ -76,6 +75,8 @@ fn check_mem(
         }
     }
 
+    // Reenable this check once add-memory-region functionality is implemented
+    return Ok(());
     Err(Error::new(ErrorKind::Other, format!(
         "Error: out of bounds memory {} (insn #{:?}), addr {:#x}, size {:?}\nmbuff: {:#x}/{:#x}, mem: {:#x}/{:#x}, stack: {:#x}/{:#x}",
         access_type, insn_ptr, addr, len,
@@ -135,7 +136,8 @@ fn parse_header(prog: &[u8]) -> Program {
             function_relocations_offset + (*header).relocated_calls * RELOCATED_CALL_STRUCT_SIZE;
 
         let mut relocated_calls = Vec::new();
-        let function_relocations_data = &prog[function_relocations_offset as usize..];
+        let function_relocations_data =
+            &prog[function_relocations_offset as usize..allowed_helpers_offset as usize];
         debug!(
             "Processing {} relocated calls...",
             function_relocations_data.len() / 8
@@ -150,9 +152,10 @@ fn parse_header(prog: &[u8]) -> Program {
 
         let mut allowed_helpers = Vec::new();
         for byte in &prog[allowed_helpers_offset as usize..] {
-            debug!("Allowed helper found: {}", byte);
             allowed_helpers.push(*byte);
         }
+        debug!("Allowed helpers: {:?}", allowed_helpers);
+
         return Program {
             text_section_offset: text_offset as usize,
             data_section_offset: data_offset as usize,
