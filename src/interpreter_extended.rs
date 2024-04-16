@@ -8,10 +8,11 @@
 //! Module provides an alternative implementation of the eBPF program interpreter.
 //! The interpreter is an extension of the one used by Femto-Containers
 //! <https://github.com/future-proof-iot/middleware2022-femtocontainers/tree/main>
+//!
 //! Contrasted with the default implementation of the rbpf interpreter, this one
 //! operates on a program binary which includes .data, .rodata and .text sections
 //! as well as a header with metadata specifying the lengths of the corresponsing
-//! sections. It also provides infromation about the relocated function calls and
+//! sections. It also provides information about the relocated function calls and
 //! so it supports programs with not-intlined, not-static functions being called
 //! by the main function.
 use core::ffi::c_void;
@@ -186,10 +187,6 @@ pub fn execute_program(
             "Error: No program set, call prog_set() to load one",
         ))?,
     };
-
-    // Check if allowed helpers are correct
-    let helper_idxs = helpers.keys().map(|v| *v).collect::<Vec<u32>>();
-    check_helpers(prog, &helper_idxs, InterpreterVariant::ExtendedHeader)?;
 
     let mut return_address_stack = vec![];
     let stack = vec![0u8; ebpf::STACK_SIZE];

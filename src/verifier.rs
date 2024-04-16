@@ -184,9 +184,12 @@ fn find_text_section(
     }
 }
 
+/// Responsible for verifying that the given program only calls helper functiions
+/// that are contained in the specified set of allowed helpers. This is done
+/// by iterating over the instructions and inspecting the CALL instructions.
 pub fn check_helpers(
     prog: &[u8],
-    available_helpers: &Vec<u32>,
+    available_helpers: &[u32],
     interpreter_variant: InterpreterVariant,
 ) -> Result<(), Error> {
     let text_section = find_text_section(prog, interpreter_variant)
@@ -215,6 +218,7 @@ pub fn check_helpers(
         };
         insn_ptr += 1;
     }
+    debug!("All helper functions calls are valid");
     Ok(())
 }
 
