@@ -10,7 +10,7 @@ pub mod without_std {
     #[derive(Debug)]
     pub struct Error {
         kind: ErrorKind,
-        error: String,
+        pub error: String,
     }
 
     impl Error {
@@ -26,6 +26,7 @@ pub mod without_std {
     /// The minimum set of variants to make the dummy ErrorKind work with
     /// the existing code.
     #[derive(Debug)]
+    #[warn(dead_code)]
     pub enum ErrorKind {
         /// The code only uses this variant.
         Other,

@@ -18,10 +18,8 @@
 //
 // Contrary to the verifier of the Linux kernel, this one does not modify the bytecode at all.
 
-use alloc::collections::BTreeMap;
 use ebpf;
 use log::debug;
-use stdlib::collections::Vec;
 use stdlib::{Error, ErrorKind};
 
 use crate::InterpreterVariant;
@@ -34,8 +32,9 @@ fn reject<S: AsRef<str>>(msg: S) -> Result<(), Error> {
 fn check_prog_len(prog: &[u8]) -> Result<(), Error> {
     if prog.len() % ebpf::INSN_SIZE != 0 {
         reject(format!(
-            "eBPF program length must be a multiple of {:?} octets",
-            ebpf::INSN_SIZE
+            "eBPF program length must be a multiple of {:?} octets, actual length: {}",
+            ebpf::INSN_SIZE,
+            prog.len()
         ))?;
     }
     if prog.len() > ebpf::PROG_MAX_SIZE {
@@ -227,9 +226,10 @@ pub fn check(prog: &[u8], interpreter_variant: InterpreterVariant) -> Result<(),
         .map_err(|s| Error::new(ErrorKind::Other, s))?;
 
     let mut insn_ptr: usize = 0;
-    let prog_text = &prog[text_section.section_offset..];
-    // TODO: reenable the verifier
-    //check_prog_len(prog_text)?;
+    let text_start = text_section.section_offset;
+    let text_end = text_start + text_section.section_len;
+    let prog_text = &prog[text_start..text_end];
+    check_prog_len(prog_text)?;
     while insn_ptr * ebpf::INSN_SIZE < text_section.section_len {
         let insn = ebpf::get_insn(prog_text, insn_ptr);
         let mut store = false;

@@ -43,7 +43,6 @@ fn check_mem(
     mem: &[u8],
     stack: &[u8],
 ) -> Result<(), Error> {
-    return Ok(());
     if let Some(addr_end) = addr.checked_add(len as u64) {
         // TODO: add proper debug logging.
         let debug = false;

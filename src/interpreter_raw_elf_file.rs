@@ -5,7 +5,6 @@
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
-use alloc::string::ToString;
 use log::debug;
 use stdlib::collections::BTreeMap;
 use stdlib::{Error, ErrorKind};
@@ -26,7 +25,6 @@ fn check_mem(
     mem: &[u8],
     stack: &[u8],
 ) -> Result<(), Error> {
-    return Ok(());
     if let Some(addr_end) = addr.checked_add(len as u64) {
         debug!("Checking memory load: {}", addr);
         debug!(

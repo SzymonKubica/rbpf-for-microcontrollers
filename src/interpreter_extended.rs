@@ -15,10 +15,7 @@
 //! sections. It also provides information about the relocated function calls and
 //! so it supports programs with not-intlined, not-static functions being called
 //! by the main function.
-use core::ffi::c_void;
 
-use crate::verifier::check_helpers;
-use crate::InterpreterVariant;
 use log::debug;
 use stdlib::collections::{BTreeMap, Vec};
 use stdlib::{Error, ErrorKind};
@@ -76,8 +73,6 @@ fn check_mem(
         }
     }
 
-    // Reenable this check once add-memory-region functionality is implemented
-    return Ok(());
     Err(Error::new(ErrorKind::Other, format!(
         "Error: out of bounds memory {} (insn #{:?}), addr {:#x}, size {:?}\nmbuff: {:#x}/{:#x}, mem: {:#x}/{:#x}, stack: {:#x}/{:#x}",
         access_type, insn_ptr, addr, len,
