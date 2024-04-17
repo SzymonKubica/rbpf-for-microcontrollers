@@ -12,6 +12,7 @@ pub mod with_alloc {
     /// no_std environment.
     pub mod collections {
         pub use alloc::vec::Vec;
+        pub use alloc::vec;
         pub use alloc::collections::BTreeMap;
     }
 }

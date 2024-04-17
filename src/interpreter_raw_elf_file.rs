@@ -5,67 +5,12 @@
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
-use log::debug;
-use stdlib::collections::BTreeMap;
-use stdlib::{Error, ErrorKind};
+use stdlib::collections::{BTreeMap, Vec};
+use stdlib::{Error, ErrorKind, String, ToString};
 
 use ebpf;
 
-// Modification here: the programs that we load contain data and rodata sections
-// and thus it is valid to perform memory loads from those sections.
-// TODO: make that check more fine-grained so that it is possible to load from
-// those sections only.
-fn check_mem(
-    addr: u64,
-    len: usize,
-    access_type: &str,
-    insn_ptr: usize,
-    mbuff: &[u8],
-    prog: &[u8],
-    mem: &[u8],
-    stack: &[u8],
-) -> Result<(), Error> {
-    if let Some(addr_end) = addr.checked_add(len as u64) {
-        debug!("Checking memory load: {}", addr);
-        debug!(
-            "mbuff: start={} len={}",
-            mbuff.as_ptr() as u64,
-            mbuff.len() as u64
-        );
-        debug!(
-            "mem: start={} len={}",
-            mem.as_ptr() as u64,
-            mem.len() as u64
-        );
-        debug!(
-            "prog: start={} len={}",
-            prog.as_ptr() as u64,
-            prog.len() as u64
-        );
-        if mbuff.as_ptr() as u64 <= addr && addr_end <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
-            return Ok(());
-        }
-        if mem.as_ptr() as u64 <= addr && addr_end <= mem.as_ptr() as u64 + mem.len() as u64 {
-            return Ok(());
-        }
-        if stack.as_ptr() as u64 <= addr && addr_end <= stack.as_ptr() as u64 + stack.len() as u64 {
-            return Ok(());
-        }
-
-        // This allows accessing .data and .rodata
-        if prog.as_ptr() as u64 <= addr && addr_end <= prog.as_ptr() as u64 + prog.len() as u64 {
-            return Ok(());
-        }
-    }
-
-    Err(Error::new(ErrorKind::Other, format!(
-        "Error: out of bounds memory {} (insn #{:?}), addr {:#x}, size {:?}\nmbuff: {:#x}/{:#x}, mem: {:#x}/{:#x}, stack: {:#x}/{:#x}",
-        access_type, insn_ptr, addr, len,
-        mbuff.as_ptr() as u64, mbuff.len(),
-        mem.as_ptr() as u64, mem.len(),
-        stack.as_ptr() as u64, stack.len()
-    )))
-}
+use crate::interpreter_common::check_mem;
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
@@ -74,6 +19,7 @@ pub fn execute_program(
     mem: &[u8],
     mbuff: &[u8],
     helpers: &BTreeMap<u32, ebpf::Helper>,
+    allowed_memory_regions: Vec<(u64, u64)>,
 ) -> Result<u64, Error> {
     const U32MAX: u64 = u32::MAX as u64;
     const SHIFT_MASK_32: u32 = 0x1f;
@@ -108,25 +54,52 @@ pub fn execute_program(
         reg[1] = mem.as_ptr() as u64;
     }
 
-    let check_mem_load = |addr: u64, len: usize, insn_ptr: usize| {
-        check_mem(addr, len, "load", insn_ptr, mbuff, prog, mem, &stack)
-    };
-    let check_mem_store = |addr: u64, len: usize, insn_ptr: usize| {
-        check_mem(addr, len, "store", insn_ptr, mbuff, prog, mem, &stack)
+    let Ok(binary) = goblin::elf::Elf::parse(&prog) else {
+        Err(Error::new(ErrorKind::Other, "Failed to parse ELF binary"))?
     };
 
-    let Ok(binary) = goblin::elf::Elf::parse(&prog) else {
-        // TODO: fix this temporary return
-        return Ok(reg[0]);
+    let Ok(text_section) = extract_section(".text", &binary, prog) else {
+        Err(Error::new(ErrorKind::Other, ".text section not found"))?
+    };
+
+    let data_section = extract_section(".data", &binary, prog).map_or(None, |v| Some(v));
+    let rodata_section = extract_section(".rodata", &binary, prog).map_or(None, |v| Some(v));
+
+    let check_mem_load = |addr: u64, len: usize, insn_ptr: usize| {
+        check_mem(
+            addr,
+            len,
+            true,
+            insn_ptr,
+            mbuff,
+            mem,
+            &stack,
+            data_section,
+            rodata_section,
+            &allowed_memory_regions,
+        )
+    };
+    let check_mem_store = |addr: u64, len: usize, insn_ptr: usize| {
+        check_mem(
+            addr,
+            len,
+            false,
+            insn_ptr,
+            mbuff,
+            mem,
+            &stack,
+            data_section,
+            rodata_section,
+            &allowed_memory_regions,
+        )
     };
 
     let mut return_address_stack = vec![];
-    let text_section = binary.section_headers.get(1).unwrap();
 
     // Loop on instructions
-    let mut insn_ptr: usize = text_section.sh_offset as usize / 8;
+    let mut insn_ptr: usize = 0;
     while insn_ptr * ebpf::INSN_SIZE < prog.len() {
-        let insn = ebpf::get_insn(prog, insn_ptr);
+        let insn = ebpf::get_insn(text_section, insn_ptr);
         insn_ptr += 1;
         let _dst = insn.dst as usize;
         let _src = insn.src as usize;
@@ -202,7 +175,7 @@ pub fn execute_program(
             }
 
             ebpf::LD_DW_IMM => {
-                let next_insn = ebpf::get_insn(prog, insn_ptr);
+                let next_insn = ebpf::get_insn(text_section, insn_ptr);
                 insn_ptr += 1;
                 reg[_dst] = ((insn.imm as u32) as u64) + ((next_insn.imm as u64) << 32);
             }
@@ -674,4 +647,22 @@ pub fn execute_program(
     }
 
     unreachable!()
+}
+
+pub fn extract_section<'a>(
+    section_name: &'static str,
+    binary: &'a goblin::elf::Elf<'_>,
+    program: &'a [u8],
+) -> Result<&'a [u8], String> {
+    for section in &binary.section_headers {
+        if let Some(name) = binary.shdr_strtab.get_at(section.sh_name) {
+            if name == section_name {
+                let section_start = section.sh_offset as usize;
+                let section_end = (section.sh_offset + section.sh_size) as usize;
+                return Ok(&program[section_start..section_end]);
+            }
+        }
+    }
+
+    return Err("Section not found".to_string());
 }

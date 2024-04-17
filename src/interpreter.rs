@@ -5,7 +5,7 @@
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 
-use stdlib::collections::BTreeMap;
+use stdlib::collections::{BTreeMap, Vec};
 use stdlib::{Error, ErrorKind};
 
 use ebpf;
@@ -47,6 +47,7 @@ pub fn execute_program(
     mem: &[u8],
     mbuff: &[u8],
     helpers: &BTreeMap<u32, ebpf::Helper>,
+    allowed_memory_regions: Vec<(u64, u64)>,
 ) -> Result<u64, Error> {
     const U32MAX: u64 = u32::MAX as u64;
     const SHIFT_MASK_32: u32 = 0x1f;

@@ -1,6 +1,7 @@
 /// Ensures compatibility with no_std.
 pub mod without_std {
     use alloc::string::String;
+    use alloc::string::ToString;
     pub use core::u32;
     pub use core::u64;
 

@@ -28,15 +28,15 @@
 )]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(feature = "std")]
+extern crate alloc;
 extern crate byteorder;
 extern crate combine;
+#[cfg(feature = "std")]
+extern crate core;
 extern crate libm;
 extern crate log;
 extern crate time;
-#[cfg(feature = "std")]
-extern crate alloc;
-#[cfg(feature = "std")]
-extern crate core;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;
@@ -69,7 +69,7 @@ mod stdlib {
 
 use byteorder::{ByteOrder, LittleEndian};
 use stdlib::collections::BTreeMap;
-use stdlib::collections::Vec;
+use stdlib::collections::{Vec, vec};
 use stdlib::u32;
 use stdlib::{Error, ErrorKind};
 
@@ -87,6 +87,7 @@ mod interpreter;
 mod interpreter_extended;
 mod interpreter_femtocontainers_header;
 mod interpreter_raw_elf_file;
+mod interpreter_common;
 
 pub use verifier::check_helpers;
 #[cfg(jit)]
@@ -222,10 +223,18 @@ impl<'a> EbpfVmMbuff<'a> {
         // closures aren't allowed to capture the interpreter variant from the
         // environment.
         let verifier: fn(prog: &[u8]) -> Result<(), Error> = match interpreter_variant {
-            InterpreterVariant::Default => |prog| verifier::check(prog, InterpreterVariant::Default),
-            InterpreterVariant::FemtoContainersHeader => |prog| verifier::check(prog, InterpreterVariant::FemtoContainersHeader),
-            InterpreterVariant::ExtendedHeader => |prog| verifier::check(prog, InterpreterVariant::ExtendedHeader),
-            InterpreterVariant::RawObjectFile => |prog| verifier::check(prog, InterpreterVariant::RawObjectFile),
+            InterpreterVariant::Default => {
+                |prog| verifier::check(prog, InterpreterVariant::Default)
+            }
+            InterpreterVariant::FemtoContainersHeader => {
+                |prog| verifier::check(prog, InterpreterVariant::FemtoContainersHeader)
+            }
+            InterpreterVariant::ExtendedHeader => {
+                |prog| verifier::check(prog, InterpreterVariant::ExtendedHeader)
+            }
+            InterpreterVariant::RawObjectFile => {
+                |prog| verifier::check(prog, InterpreterVariant::RawObjectFile)
+            }
         };
 
         Ok(EbpfVmMbuff {
@@ -401,25 +410,43 @@ impl<'a> EbpfVmMbuff<'a> {
     /// let res = vm.execute_program(mem, &mut mbuff).unwrap();
     /// assert_eq!(res, 0x2211);
     /// ```
-    pub fn execute_program(&self, mem: &[u8], mbuff: &[u8]) -> Result<u64, Error> {
+    pub fn execute_program(
+        &self,
+        mem: &[u8],
+        mbuff: &[u8],
+        allowed_memory_regions: Vec<(u64, u64)>,
+    ) -> Result<u64, Error> {
         match self.interpreter_variant {
-            InterpreterVariant::Default => {
-                interpreter::execute_program(self.prog, mem, mbuff, &self.helpers)
-            }
+            InterpreterVariant::Default => interpreter::execute_program(
+                self.prog,
+                mem,
+                mbuff,
+                &self.helpers,
+                allowed_memory_regions,
+            ),
             InterpreterVariant::FemtoContainersHeader => {
                 interpreter_femtocontainers_header::execute_program(
                     self.prog,
                     mem,
                     mbuff,
                     &self.helpers,
+                    allowed_memory_regions,
                 )
             }
-            InterpreterVariant::ExtendedHeader => {
-                interpreter_extended::execute_program(self.prog, mem, mbuff, &self.helpers)
-            }
-            InterpreterVariant::RawObjectFile => {
-                interpreter_raw_elf_file::execute_program(self.prog, mem, mbuff, &self.helpers)
-            }
+            InterpreterVariant::ExtendedHeader => interpreter_extended::execute_program(
+                self.prog,
+                mem,
+                mbuff,
+                &self.helpers,
+                allowed_memory_regions,
+            ),
+            InterpreterVariant::RawObjectFile => interpreter_raw_elf_file::execute_program(
+                self.prog,
+                mem,
+                mbuff,
+                &self.helpers,
+                allowed_memory_regions,
+            ),
         }
     }
 
@@ -955,7 +982,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
             &mut self.mbuff.buffer[(self.mbuff.data_end_offset)..],
             mem.as_ptr() as u64 + mem.len() as u64,
         );
-        self.parent.execute_program(mem, &self.mbuff.buffer)
+        self.parent.execute_program(mem, &self.mbuff.buffer, vec![])
     }
 
     /// JIT-compile the loaded program. No argument required for this.
@@ -1389,7 +1416,7 @@ impl<'a> EbpfVmRaw<'a> {
     /// assert_eq!(res, 0x22cc);
     /// ```
     pub fn execute_program(&self, mem: &'a mut [u8]) -> Result<u64, Error> {
-        self.parent.execute_program(mem, &[])
+        self.parent.execute_program(mem, &[], vec![])
     }
 
     /// JIT-compile the loaded program. No argument required for this.

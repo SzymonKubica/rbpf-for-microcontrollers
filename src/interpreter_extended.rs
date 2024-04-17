@@ -22,65 +22,7 @@ use stdlib::{Error, ErrorKind};
 
 use ebpf;
 
-// Modification here: the programs that we load contain data and rodata sections
-// and thus it is valid to perform memory loads from those sections.
-// TODO: make that check more fine-grained so that it is possible to load from
-// those sections only.
-fn check_mem(
-    addr: u64,
-    len: usize,
-    access_type: &str,
-    insn_ptr: usize,
-    mbuff: &[u8],
-    prog: &[u8],
-    mem: &[u8],
-    stack: &[u8],
-) -> Result<(), Error> {
-    if let Some(addr_end) = addr.checked_add(len as u64) {
-        // TODO: add proper debug logging.
-        let debug = false;
-        if debug {
-            debug!("Checking memory load: {}", addr);
-            debug!(
-                "mbuff: start={} len={}",
-                mbuff.as_ptr() as u64,
-                mbuff.len() as u64
-            );
-            debug!(
-                "mem: start={} len={}",
-                mem.as_ptr() as u64,
-                mem.len() as u64
-            );
-            debug!(
-                "prog: start={} len={}",
-                prog.as_ptr() as u64,
-                prog.len() as u64
-            );
-        }
-        if mbuff.as_ptr() as u64 <= addr && addr_end <= mbuff.as_ptr() as u64 + mbuff.len() as u64 {
-            return Ok(());
-        }
-        if mem.as_ptr() as u64 <= addr && addr_end <= mem.as_ptr() as u64 + mem.len() as u64 {
-            return Ok(());
-        }
-        if stack.as_ptr() as u64 <= addr && addr_end <= stack.as_ptr() as u64 + stack.len() as u64 {
-            return Ok(());
-        }
-
-        // This allows accessing .data and .rodata
-        if prog.as_ptr() as u64 <= addr && addr_end <= prog.as_ptr() as u64 + prog.len() as u64 {
-            return Ok(());
-        }
-    }
-
-    Err(Error::new(ErrorKind::Other, format!(
-        "Error: out of bounds memory {} (insn #{:?}), addr {:#x}, size {:?}\nmbuff: {:#x}/{:#x}, mem: {:#x}/{:#x}, stack: {:#x}/{:#x}",
-        access_type, insn_ptr, addr, len,
-        mbuff.as_ptr() as u64, mbuff.len(),
-        mem.as_ptr() as u64, mem.len(),
-        stack.as_ptr() as u64, stack.len()
-    )))
-}
+use crate::interpreter_common::{check_mem, ElfSection};
 
 #[derive(Copy, Clone, Debug)]
 struct BytecodeHeader {
@@ -101,9 +43,9 @@ struct FunctionRelocation {
 }
 
 struct Program {
-    text_section_offset: usize,
-    data_section_offset: usize,
-    rodata_section_offset: usize,
+    text_section: ElfSection,
+    data_section: ElfSection,
+    rodata_section: ElfSection,
     prog_len: usize,
     relocated_calls: Vec<FunctionRelocation>,
     allowed_helpers: Vec<u8>,
@@ -153,9 +95,9 @@ fn parse_header(prog: &[u8]) -> Program {
         debug!("Allowed helpers: {:?}", allowed_helpers);
 
         return Program {
-            text_section_offset: text_offset as usize,
-            data_section_offset: data_offset as usize,
-            rodata_section_offset: rodata_offset as usize,
+            text_section: ElfSection::new(text_offset, (*header).text_len),
+            data_section: ElfSection::new(data_offset, (*header).data_len),
+            rodata_section: ElfSection::new(rodata_offset, (*header).rodata_len),
             prog_len: (*header).text_len as usize,
             relocated_calls,
             allowed_helpers,
@@ -170,6 +112,7 @@ pub fn execute_program(
     mem: &[u8],
     mbuff: &[u8],
     helpers: &BTreeMap<u32, ebpf::Helper>,
+    allowed_memory_regions: Vec<(u64, u64)>,
 ) -> Result<u64, Error> {
     const U32MAX: u64 = u32::MAX as u64;
     const SHIFT_MASK_32: u32 = 0x1f;
@@ -206,21 +149,46 @@ pub fn execute_program(
         reg[1] = mem.as_ptr() as u64;
     }
 
-    let check_mem_load = |addr: u64, len: usize, insn_ptr: usize| {
-        check_mem(addr, len, "load", insn_ptr, mbuff, prog, mem, &stack)
-    };
-    let check_mem_store = |addr: u64, len: usize, insn_ptr: usize| {
-        check_mem(addr, len, "store", insn_ptr, mbuff, prog, mem, &stack)
-    };
-
-    // Loop on instructions
-    let mut insn_ptr: usize = 0;
-    // We need to adapt it here to work with Femto-Container bytecode.
-    // The starting instruction pointer isn't the start of the program. It is
-    // the start of the .text section.
     let program = parse_header(prog);
     debug!("Relocated calls: {:?}", program.relocated_calls);
-    let prog_text = &prog[program.text_section_offset..];
+    let prog_text = program.text_section.extract_section_reference(prog);
+    let prog_data = program.data_section.extract_section_reference(prog);
+    let prog_rodata = program.rodata_section.extract_section_reference(prog);
+
+    let check_mem_load = |addr: u64, len: usize, insn_ptr: usize| {
+        check_mem(
+            addr,
+            len,
+            true,
+            insn_ptr,
+            mbuff,
+            mem,
+            &stack,
+            Some(prog_data),
+            Some(prog_rodata),
+            &allowed_memory_regions,
+        )
+    };
+    let check_mem_store = |addr: u64, len: usize, insn_ptr: usize| {
+        check_mem(
+            addr,
+            len,
+            false,
+            insn_ptr,
+            mbuff,
+            mem,
+            &stack,
+            Some(prog_data),
+            Some(prog_rodata),
+            &allowed_memory_regions,
+        )
+    };
+
+    // The starting instruction pointer isn't the start of the program. It is
+    // the start of the .text section.
+    let mut insn_ptr: usize = 0;
+
+    // Loop on instructions
     while insn_ptr * ebpf::INSN_SIZE < prog.len() {
         let insn = ebpf::get_insn(prog_text, insn_ptr);
 
@@ -312,7 +280,7 @@ pub fn execute_program(
                 let next_insn = ebpf::get_insn(prog_text, insn_ptr);
                 insn_ptr += 1;
                 reg[_dst] = prog.as_ptr() as u64
-                    + program.data_section_offset as u64
+                    + program.data_section.offset as u64
                     + ((insn.imm as u32) as u64)
                     + ((next_insn.imm as u64) << 32);
             }
@@ -321,7 +289,7 @@ pub fn execute_program(
                 let next_insn = ebpf::get_insn(prog_text, insn_ptr);
                 insn_ptr += 1;
                 reg[_dst] = prog.as_ptr() as u64
-                    + program.rodata_section_offset as u64
+                    + program.rodata_section.offset as u64
                     + ((insn.imm as u32) as u64)
                     + ((next_insn.imm as u64) << 32);
             }
