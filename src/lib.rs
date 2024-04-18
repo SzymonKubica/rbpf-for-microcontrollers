@@ -72,6 +72,7 @@ use stdlib::collections::BTreeMap;
 use stdlib::collections::{Vec, vec};
 use stdlib::u32;
 use stdlib::{Error, ErrorKind};
+pub use jit_thumbv7em::{JitCompiler, JitMemory};
 
 #[cfg(std)]
 mod asm_parser;
@@ -88,6 +89,7 @@ mod interpreter_extended;
 mod interpreter_femtocontainers_header;
 mod interpreter_raw_elf_file;
 mod interpreter_common;
+mod jit_thumbv7em;
 
 pub use verifier::check_helpers;
 #[cfg(jit)]
