@@ -71,22 +71,22 @@ pub enum ThumbInstruction {
     BranchAndExchange { rm: u8 },
     BranchWithLinkAndExchange { rm: u8 },
     // Load/store single data item
-    StoreRegister,
-    StoreRegisterHalfword,
-    StoreRegisterByte,
-    LoadRegisterSignedByte,
-    LoadRegister,
-    LoadRegisterHalfword,
-    LoadRegisterByte,
-    LoadRegisterSignedHalfword,
-    StoreRegisterImmediate,
-    LoadRegisterImmediate,
-    StoreRegisterByteImmediate,
-    LoadRegisterByteImmediate,
-    StoreRegisterHalfwordImmediate,
-    LoadRegisterHalfwordImmediate,
-    StoreRegisterSPRelativeImmediate,
-    LoadRegisterSPRelativeImmediate,
+    StoreRegister { rm: u8, rn: u8, rt: u8 },
+    StoreRegisterHalfword { rm: u8, rn: u8, rt: u8 },
+    StoreRegisterByte { rm: u8, rn: u8, rt: u8 },
+    LoadRegisterSignedByte { rm: u8, rn: u8, rt: u8 },
+    LoadRegister { rm: u8, rn: u8, rt: u8 },
+    LoadRegisterHalfword { rm: u8, rn: u8, rt: u8 },
+    LoadRegisterByte { rm: u8, rn: u8, rt: u8 },
+    LoadRegisterSignedHalfword { rm: u8, rn: u8, rt: u8 },
+    StoreRegisterImmediate { imm5: u8, rn: u8, rt: u8 },
+    LoadRegisterImmediate { imm5: u8, rn: u8, rt: u8 },
+    StoreRegisterByteImmediate { imm5: u8, rn: u8, rt: u8 },
+    LoadRegisterByteImmediate { imm5: u8, rn: u8, rt: u8 },
+    StoreRegisterHalfwordImmediate { imm5: u8, rn: u8, rt: u8 },
+    LoadRegisterHalfwordImmediate { imm5: u8, rn: u8, rt: u8 },
+    StoreRegisterSPRelativeImmediate { imm8: u8, rt: u8 },
+    LoadRegisterSPRelativeImmediate { imm8: u8, rt: u8 },
     // Miscellaneous 16-bit instructions
     ChangeProcessorState,
     AddImmediateToSP { imm: u16 },
@@ -121,23 +121,23 @@ impl ThumbInstruction {
             // Shift (immediate), add, subtract, move, and compare
             ThumbInstruction::LogicalShiftLeftImmediate { imm5, rm, rd } => {
                 const LSL_OPCODE: u8 = 0b00;
-                Immediate5TwoRegistersEncoding::new(LSL_OPCODE, *imm5, *rm, *rd).encode()
+                Immediate5TwoRegistersEncoding::new(BASIC, LSL_OPCODE, *imm5, *rm, *rd).encode()
             }
             ThumbInstruction::LogicalShiftRightImmediate { imm5, rm, rd } => {
                 const LSR_OPCODE: u8 = 0b01;
-                Immediate5TwoRegistersEncoding::new(LSR_OPCODE, *imm5, *rm, *rd).encode()
+                Immediate5TwoRegistersEncoding::new(BASIC, LSR_OPCODE, *imm5, *rm, *rd).encode()
             }
             ThumbInstruction::ArithmeticShiftRightImmediate { imm5, rm, rd } => {
                 const ASR_OPCODE: u8 = 0b10;
-                Immediate5TwoRegistersEncoding::new(ASR_OPCODE, *imm5, *rm, *rd).encode()
+                Immediate5TwoRegistersEncoding::new(BASIC, ASR_OPCODE, *imm5, *rm, *rd).encode()
             }
             ThumbInstruction::Add { rm, rn, rd } => {
                 const ADD_OPCODE: u8 = 0b01100;
-                ThreeRegistersEncoding::new(ADD_OPCODE, *rm, *rn, *rd).encode()
+                ThreeRegistersEncoding::new(BASIC, ADD_OPCODE, *rm, *rn, *rd).encode()
             }
             ThumbInstruction::Subtract { rm, rn, rd } => {
                 const SUB_OPCODE: u8 = 0b01101;
-                ThreeRegistersEncoding::new(SUB_OPCODE, *rm, *rn, *rd).encode()
+                ThreeRegistersEncoding::new(BASIC, SUB_OPCODE, *rm, *rn, *rd).encode()
             }
             ThumbInstruction::Add3BitImmediate { imm3, rn, rd } => {
                 const ADD_OPCODE: u8 = 0b01110;
@@ -149,19 +149,19 @@ impl ThumbInstruction {
             }
             ThumbInstruction::MoveImmediate { rd, imm8 } => {
                 const MOV_OPCODE: u8 = 0b0100;
-                Immediate8OneRegisterEncoding::new(MOV_OPCODE, *imm8, *rd).encode()
+                Immediate8OneRegisterEncoding::new(BASIC, MOV_OPCODE, *imm8, *rd).encode()
             }
             ThumbInstruction::CompareImmediate { rd, imm8 } => {
                 const CPM_OPCODE: u8 = 0b0101;
-                Immediate8OneRegisterEncoding::new(CPM_OPCODE, *imm8, *rd).encode()
+                Immediate8OneRegisterEncoding::new(BASIC, CPM_OPCODE, *imm8, *rd).encode()
             }
             ThumbInstruction::Add8BitImmediate { rd, imm8 } => {
                 const SUB_OPCODE: u8 = 0b110;
-                Immediate8OneRegisterEncoding::new(SUB_OPCODE, *imm8, *rd).encode()
+                Immediate8OneRegisterEncoding::new(BASIC, SUB_OPCODE, *imm8, *rd).encode()
             }
             ThumbInstruction::Subtract8BitImmediate { rd, imm8 } => {
                 const SUB_OPCODE: u8 = 0b111;
-                Immediate8OneRegisterEncoding::new(SUB_OPCODE, *imm8, *rd).encode()
+                Immediate8OneRegisterEncoding::new(BASIC, SUB_OPCODE, *imm8, *rd).encode()
             }
             // Data processing (operate mostly on registers)
             ThumbInstruction::BitwiseAND { rm, rd } => {
@@ -250,22 +250,86 @@ impl ThumbInstruction {
                 SpecialBranchEncoding::new(BLX_OPCODE, *rm).encode()
             }
             // Load/store single data item
-            ThumbInstruction::StoreRegister => todo!(),
-            ThumbInstruction::StoreRegisterHalfword => todo!(),
-            ThumbInstruction::StoreRegisterByte => todo!(),
-            ThumbInstruction::LoadRegisterSignedByte => todo!(),
-            ThumbInstruction::LoadRegister => todo!(),
-            ThumbInstruction::LoadRegisterHalfword => todo!(),
-            ThumbInstruction::LoadRegisterByte => todo!(),
-            ThumbInstruction::LoadRegisterSignedHalfword => todo!(),
-            ThumbInstruction::StoreRegisterImmediate => todo!(),
-            ThumbInstruction::LoadRegisterImmediate => todo!(),
-            ThumbInstruction::StoreRegisterByteImmediate => todo!(),
-            ThumbInstruction::LoadRegisterByteImmediate => todo!(),
-            ThumbInstruction::StoreRegisterHalfwordImmediate => todo!(),
-            ThumbInstruction::LoadRegisterHalfwordImmediate => todo!(),
-            ThumbInstruction::StoreRegisterSPRelativeImmediate => todo!(),
-            ThumbInstruction::LoadRegisterSPRelativeImmediate => todo!(),
+            ThumbInstruction::StoreRegister { rm, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0101, 4);
+                const STR_OPCODE: u8 = 0b000;
+                ThreeRegistersEncoding::new(OP_A, STR_OPCODE, *rm, *rn, *rt).encode()
+            }
+            ThumbInstruction::StoreRegisterHalfword { rm, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0101, 4);
+                const STRH_OPCODE: u8 = 0b001;
+                ThreeRegistersEncoding::new(OP_A, STRH_OPCODE, *rm, *rn, *rt).encode()
+            }
+            ThumbInstruction::StoreRegisterByte { rm, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0101, 4);
+                const STRB_OPCODE: u8 = 0b010;
+                ThreeRegistersEncoding::new(OP_A, STRB_OPCODE, *rm, *rn, *rt).encode()
+            }
+            ThumbInstruction::LoadRegisterSignedByte { rm, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0101, 4);
+                const LDRSB_OPCODE: u8 = 0b011;
+                ThreeRegistersEncoding::new(OP_A, LDRSB_OPCODE, *rm, *rn, *rt).encode()
+            }
+            ThumbInstruction::LoadRegister { rm, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0101, 4);
+                const LDR_OPCODE: u8 = 0b100;
+                ThreeRegistersEncoding::new(OP_A, LDR_OPCODE, *rm, *rn, *rt).encode()
+            }
+            ThumbInstruction::LoadRegisterHalfword { rm, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0101, 4);
+                const LDRH_OPCODE: u8 = 0b101;
+                ThreeRegistersEncoding::new(OP_A, LDRH_OPCODE, *rm, *rn, *rt).encode()
+            }
+            ThumbInstruction::LoadRegisterByte { rm, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0101, 4);
+                const LDRB_OPCODE: u8 = 0b110;
+                ThreeRegistersEncoding::new(OP_A, LDRB_OPCODE, *rm, *rn, *rt).encode()
+            }
+            ThumbInstruction::LoadRegisterSignedHalfword { rm, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0101, 4);
+                const LDRSH_OPCODE: u8 = 0b111;
+                ThreeRegistersEncoding::new(OP_A, LDRSH_OPCODE, *rm, *rn, *rt).encode()
+            }
+            ThumbInstruction::StoreRegisterImmediate { imm5, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0110, 4);
+                const STR_OPCODE: u8 = 0b0;
+                Immediate5TwoRegistersEncoding::new(OP_A, STR_OPCODE, *imm5, *rn, *rt).encode()
+            }
+            ThumbInstruction::LoadRegisterImmediate { imm5, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0110, 4);
+                const LDR_OPCODE: u8 = 0b1;
+                Immediate5TwoRegistersEncoding::new(OP_A, LDR_OPCODE, *imm5, *rn, *rt).encode()
+            }
+            ThumbInstruction::StoreRegisterByteImmediate { imm5, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0111, 4);
+                const STRB_OPCODE: u8 = 0b0;
+                Immediate5TwoRegistersEncoding::new(OP_A, STRB_OPCODE, *imm5, *rn, *rt).encode()
+            }
+            ThumbInstruction::LoadRegisterByteImmediate { imm5, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0111, 4);
+                const LDRB_OPCODE: u8 = 0b1;
+                Immediate5TwoRegistersEncoding::new(OP_A, LDRB_OPCODE, *imm5, *rn, *rt).encode()
+            }
+            ThumbInstruction::StoreRegisterHalfwordImmediate { imm5, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1000, 4);
+                const STRH_OPCODE: u8 = 0b0;
+                Immediate5TwoRegistersEncoding::new(OP_A, STRH_OPCODE, *imm5, *rn, *rt).encode()
+            }
+            ThumbInstruction::LoadRegisterHalfwordImmediate { imm5, rn, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1000, 4);
+                const LDRH_OPCODE: u8 = 0b1;
+                Immediate5TwoRegistersEncoding::new(OP_A, LDRH_OPCODE, *imm5, *rn, *rt).encode()
+            }
+            ThumbInstruction::StoreRegisterSPRelativeImmediate { imm8, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1001, 4);
+                const STR_OPCODE: u8 = 0b0;
+                Immediate8OneRegisterEncoding::new(OP_A, STR_OPCODE, *imm8, *rt).encode()
+            }
+            ThumbInstruction::LoadRegisterSPRelativeImmediate { imm8, rt } => {
+                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1001, 4);
+                const STR_OPCODE: u8 = 0b1;
+                Immediate8OneRegisterEncoding::new(OP_A, STR_OPCODE, *imm8, *rt).encode()
+            }
             ThumbInstruction::ChangeProcessorState => todo!(),
             // Miscellaneous 16-bit instructions
             ThumbInstruction::AddImmediateToSP {
@@ -445,15 +509,6 @@ impl Encoding for SPPlusMinusImmediateEncoding {
     }
 }
 
-pub struct Immediate5TwoRegistersEncoding {
-    class_opcode: InstructionClassOpcode,
-    opcode: u8,
-    imm5: u8,
-    rm: u8,
-    // Destination register
-    rd: u8,
-}
-
 impl Immediate3TwoRegistersEncoding {
     pub fn new(opcode: u8, imm3: u8, rn: u8, rd: u8) -> Immediate3TwoRegistersEncoding {
         Immediate3TwoRegistersEncoding {
@@ -488,10 +543,25 @@ pub struct Immediate3TwoRegistersEncoding {
     rd: u8,
 }
 
+pub struct Immediate5TwoRegistersEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    imm5: u8,
+    rm: u8,
+    // Destination register
+    rd: u8,
+}
+
 impl Immediate5TwoRegistersEncoding {
-    pub fn new(opcode: u8, imm5: u8, rm: u8, rd: u8) -> Immediate5TwoRegistersEncoding {
+    pub fn new(
+        class_opcode: InstructionClassOpcode,
+        opcode: u8,
+        imm5: u8,
+        rm: u8,
+        rd: u8,
+    ) -> Immediate5TwoRegistersEncoding {
         Immediate5TwoRegistersEncoding {
-            class_opcode: BASIC,
+            class_opcode,
             opcode,
             imm5,
             rm,
@@ -504,7 +574,12 @@ impl Encoding for Immediate5TwoRegistersEncoding {
     fn encode(&self) -> u16 {
         let mut encoding = 0;
         self.class_opcode.apply(&mut encoding);
-        encoding |= (self.opcode as u16 & 0b11) << 11;
+        let opcode_mask: u16 = match self.class_opcode.opcode_length {
+            2 => 0b111,
+            4 => 0b1,
+            _ => panic!("Unexpected opcode length in Immediate5TwoRegistersEncoding"),
+        };
+        encoding |= (self.opcode as u16 & opcode_mask) << 11;
         encoding |= (self.imm5 as u16 & 0b11111) << 6;
         encoding |= (self.rm as u16 & 0b111) << 3;
         encoding |= self.rd as u16 & 0b111;
@@ -522,9 +597,14 @@ pub struct Immediate8OneRegisterEncoding {
 }
 
 impl Immediate8OneRegisterEncoding {
-    pub fn new(opcode: u8, imm8: u8, rd: u8) -> Immediate8OneRegisterEncoding {
+    pub fn new(
+        class_opcode: InstructionClassOpcode,
+        opcode: u8,
+        imm8: u8,
+        rd: u8,
+    ) -> Immediate8OneRegisterEncoding {
         Immediate8OneRegisterEncoding {
-            class_opcode: BASIC,
+            class_opcode,
             opcode,
             imm8,
             rd,
@@ -536,7 +616,12 @@ impl Encoding for Immediate8OneRegisterEncoding {
     fn encode(&self) -> u16 {
         let mut encoding = 0;
         self.class_opcode.apply(&mut encoding);
-        encoding |= (self.opcode as u16 & 0b111) << 11;
+        let opcode_mask: u16 = match self.class_opcode.opcode_length {
+            2 => 0b111,
+            4 => 0b11,
+            _ => panic!("Unexpected opcode length in Immediate8OneRegisterEncoding"),
+        };
+        encoding |= (self.opcode as u16 & opcode_mask) << 11;
         encoding |= (self.rd as u16 & 0b111) << 8;
         encoding |= self.imm8 as u16 & 0b11111111;
         encoding
@@ -553,9 +638,15 @@ pub struct ThreeRegistersEncoding {
 }
 
 impl ThreeRegistersEncoding {
-    pub fn new(opcode: u8, rm: u8, rn: u8, rd: u8) -> ThreeRegistersEncoding {
+    pub fn new(
+        class_opcode: InstructionClassOpcode,
+        opcode: u8,
+        rm: u8,
+        rn: u8,
+        rd: u8,
+    ) -> ThreeRegistersEncoding {
         ThreeRegistersEncoding {
-            class_opcode: BASIC,
+            class_opcode,
             opcode,
             rm,
             rn,
@@ -568,7 +659,15 @@ impl Encoding for ThreeRegistersEncoding {
     fn encode(&self) -> u16 {
         let mut encoding = 0;
         self.class_opcode.apply(&mut encoding);
-        encoding |= (self.opcode as u16 & 0b11111) << 9;
+        // The three registers encoding is used both for basic ADD and
+        // STR instructions, in the latter case the specific `opcode` length
+        // is smaller so we need to adjust the mask depending on the length
+        // of the class opcode.
+        let opcode_mask = match self.class_opcode.opcode_length {
+            2 => 0b11111,
+            4 => 0b111,
+        };
+        encoding |= (self.opcode as u16 & opcode_mask) << 9;
         encoding |= (self.rm as u16 & 0b111) << 6;
         encoding |= (self.rn as u16 & 0b111) << 3;
         encoding |= self.rd as u16 & 0b111;
