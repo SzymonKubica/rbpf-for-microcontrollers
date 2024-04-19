@@ -1,3 +1,5 @@
+use crate::{JitMemory, jit_thumbv7em::emit};
+
 // Registers
 pub const R0: u8 = 0;
 pub const R1: u8 = 1;
@@ -21,6 +23,8 @@ pub const ARGUMENT_REGISTERS: [u8; 4] = [R0, R1, R2, R3];
 // The short 16b version of push multiple doesn't allow for pushing registers
 // other than R0-R7 and LR so we can only save those
 pub const CALLEE_SAVED_REGISTERS: [u8; 4] = [R4, R5, R6, R7];
+
+pub const INSTRUCTION_SIZE: u16 = 16;
 
 /// The 16b Thumb instructions subset of the ARMv7-M ISA. They are taken directly
 /// from the ARMv7-M Architecture Reference Manual without renaming / abstracting
@@ -84,26 +88,194 @@ pub enum ThumbInstruction {
     LoadRegisterSPRelativeImmediate,
     // Miscellaneous 16-bit instructions
     ChangeProcessorStateCPSon,
-    AddImmediatetoSPADD,
-    SubtractImmediatefromSPSUB,
+    AddImmediateToSP,
+    SubtractImmediateFromSP,
     CompareAndBranchOnZero,
-    SignedExtendHalfwordSXTHon,
-    SignedExtendByteSXTBon,
-    UnsignedExtendHalfwordUXTHon,
-    UnsignedExtendByteUXTBon,
-    PushMultipleRegistersPUSHon,
+    SignedExtendHalfword,
+    SignedExtendByte,
+    UnsignedExtendHalfword,
+    UnsignedExtendByte,
+    PushMultipleRegisters(PushPopEncoding),
     ByteReverseWord,
     ByteReversePackedHalfword,
     ByteReverseSignedHalfword,
     CompareAndBranchOnNonZero,
-    PopMultipleRegisters,
+    PopMultipleRegisters(PushPopEncoding),
     Breakpoint,
+    // If-Then and hints
     IfThen,
     NoOperationHint,
     YieldHint,
     WaitForEventHint,
     WaitForInterruptHint,
     SendEventHint,
+    // Conditional branch and supervisor call
     ConditionalBranch,
     SupervisorCall,
 }
+
+impl ThumbInstruction {
+    pub fn emit(&self, mem: &mut JitMemory) {
+        let encoding = match self {
+            ThumbInstruction::LogicalShiftLeftImmediate => todo!(),
+            ThumbInstruction::LogicalShiftRightImmediate => todo!(),
+            ThumbInstruction::ArithmeticShiftRightASRImmediate => todo!(),
+            ThumbInstruction::Add => todo!(),
+            ThumbInstruction::Subtract => todo!(),
+            ThumbInstruction::Add3BitImmediate => todo!(),
+            ThumbInstruction::Subtract3BitImmediate => todo!(),
+            ThumbInstruction::MoveImmediate => todo!(),
+            ThumbInstruction::CompareImmediate => todo!(),
+            ThumbInstruction::Add8BitImmediate => todo!(),
+            ThumbInstruction::Subtract8BitImmediate => todo!(),
+            ThumbInstruction::BitwiseAND => todo!(),
+            ThumbInstruction::ExclusiveOR => todo!(),
+            ThumbInstruction::LogicalShiftLeft => todo!(),
+            ThumbInstruction::LogicalShiftRight => todo!(),
+            ThumbInstruction::ArithmeticShiftRight => todo!(),
+            ThumbInstruction::AddWithCarry => todo!(),
+            ThumbInstruction::SubtractWithCarry => todo!(),
+            ThumbInstruction::RotateRight => todo!(),
+            ThumbInstruction::SetFlagsOnBitwiseAND => todo!(),
+            ThumbInstruction::ReverseSubtractFrom0 => todo!(),
+            ThumbInstruction::Compare => todo!(),
+            ThumbInstruction::CompareNegative => todo!(),
+            ThumbInstruction::LogicalOR => todo!(),
+            ThumbInstruction::MultiplyTwoRegisters => todo!(),
+            ThumbInstruction::BitClear => todo!(),
+            ThumbInstruction::BitwiseNOT => todo!(),
+            ThumbInstruction::AddRegistersSpecial => todo!(),
+            ThumbInstruction::CompareRegistersSpecial => todo!(),
+            ThumbInstruction::MoveRegistersSpecial => todo!(),
+            ThumbInstruction::BranchAndExchange => todo!(),
+            ThumbInstruction::BranchWithLinkAndExchange => todo!(),
+            ThumbInstruction::StoreRegister => todo!(),
+            ThumbInstruction::StoreRegisterHalfword => todo!(),
+            ThumbInstruction::StoreRegisterByte => todo!(),
+            ThumbInstruction::LoadRegisterSignedByte => todo!(),
+            ThumbInstruction::LoadRegister => todo!(),
+            ThumbInstruction::LoadRegisterHalfword => todo!(),
+            ThumbInstruction::LoadRegisterByte => todo!(),
+            ThumbInstruction::LoadRegisterSignedHalfword => todo!(),
+            ThumbInstruction::StoreRegisterImmediate => todo!(),
+            ThumbInstruction::LoadRegisterImmediate => todo!(),
+            ThumbInstruction::StoreRegisterByteImmediate => todo!(),
+            ThumbInstruction::LoadRegisterByteImmediate => todo!(),
+            ThumbInstruction::StoreRegisterHalfwordImmediate => todo!(),
+            ThumbInstruction::LoadRegisterHalfwordImmediate => todo!(),
+            ThumbInstruction::StoreRegisterSPRelativeImmediate => todo!(),
+            ThumbInstruction::LoadRegisterSPRelativeImmediate => todo!(),
+            ThumbInstruction::ChangeProcessorStateCPSon => todo!(),
+            ThumbInstruction::AddImmediateToSP => todo!(),
+            ThumbInstruction::SubtractImmediateFromSP => todo!(),
+            ThumbInstruction::CompareAndBranchOnZero => todo!(),
+            ThumbInstruction::SignedExtendHalfword => todo!(),
+            ThumbInstruction::SignedExtendByte => todo!(),
+            ThumbInstruction::UnsignedExtendHalfword => todo!(),
+            ThumbInstruction::UnsignedExtendByte => todo!(),
+            ThumbInstruction::PushMultipleRegisters(s) => s.encode(),
+            ThumbInstruction::ByteReverseWord => todo!(),
+            ThumbInstruction::ByteReversePackedHalfword => todo!(),
+            ThumbInstruction::ByteReverseSignedHalfword => todo!(),
+            ThumbInstruction::CompareAndBranchOnNonZero => todo!(),
+            ThumbInstruction::PopMultipleRegisters(s) => s.encode(),
+            ThumbInstruction::Breakpoint => todo!(),
+            ThumbInstruction::IfThen => todo!(),
+            ThumbInstruction::NoOperationHint => todo!(),
+            ThumbInstruction::YieldHint => todo!(),
+            ThumbInstruction::WaitForEventHint => todo!(),
+            ThumbInstruction::WaitForInterruptHint => todo!(),
+            ThumbInstruction::SendEventHint => todo!(),
+            ThumbInstruction::ConditionalBranch => todo!(),
+            ThumbInstruction::SupervisorCall => todo!(),
+        };
+
+        emit::<u16>(mem, encoding)
+    }
+}
+
+
+
+// All instruction classes with their corresponding opcodes defined
+
+/// Shift (immediate), add, subtract, move, and compare
+pub const BASIC: InstructionClassOpcode = InstructionClassOpcode::new(0b00, 2);
+/// Data processing (operate mostly on registers)
+pub const DATA_PROCESSING: InstructionClassOpcode = InstructionClassOpcode::new(0b01000, 6);
+/// Special data instructions and branch and exchange
+pub const SPECIAL_DATA_INSTRUCTIONS: InstructionClassOpcode =
+    InstructionClassOpcode::new(0b010001, 6);
+/// Load/store single data item - this set of instructions doesn't have a fixed prefix
+pub const LOAD_STORE_SINGLE_ITEM: InstructionClassOpcode = InstructionClassOpcode::new(0b0, 0);
+/// Miscellaneous 16-bit instructions
+pub const MISCELLANEOUS: InstructionClassOpcode = InstructionClassOpcode::new(0b1011, 4);
+/// If-Then and hints
+pub const IF_THEN_AND_HINTS: InstructionClassOpcode = InstructionClassOpcode::new(0b10111111, 8);
+/// Conditional branch and supervisor call
+pub const COND_BRANCH_AND_SUPERVISOR_CALL: InstructionClassOpcode =
+    InstructionClassOpcode::new(0b1101, 4);
+
+/// The beginning bits of each Thumb 16 instruction used to distinguish between
+/// the different instruction class types. It has variable length as some instruction
+/// classes have a fixed long opcode that doesn't change between members of the
+/// class, whereasa others e.g. Load/Store single data item don't have a fixed
+/// shared prefix at all.
+pub struct InstructionClassOpcode {
+    opcode_value: u16,
+    opcode_length: u16,
+}
+
+impl InstructionClassOpcode {
+    pub const fn new(opcode_value: u16, opcode_length: u16) -> InstructionClassOpcode {
+        InstructionClassOpcode {
+            opcode_value,
+            opcode_length,
+        }
+    }
+
+    /// Inserts the opcode at its corresponding place into the mutable instruction
+    /// encoding.
+    pub fn apply(&self, encoding: &mut u16) {
+        *encoding |= self.opcode_value << (INSTRUCTION_SIZE - self.opcode_length);
+    }
+}
+
+pub struct PushPopEncoding {
+    // The shared prefix common for all members of the class
+    class_opcode: InstructionClassOpcode,
+    // 3 bits specifying whether we have push or pop
+    opcode: u8,
+    // The single bit in front of `register_list` specifying whether we
+    // push LR or pop PC
+    m_p_bit: u8,
+    // The 8 bits of the register list, they allow for popping/pushing regs
+    // within range R0-R7
+    register_list: u8,
+}
+
+impl PushPopEncoding {
+    pub fn new(opcode: u8, m_p_bit: u8, register_list: u8) -> PushPopEncoding {
+        PushPopEncoding {
+            class_opcode: SPECIAL_DATA_INSTRUCTIONS,
+            opcode,
+            m_p_bit,
+            register_list,
+        }
+    }
+}
+
+impl Encoding for PushPopEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16) << 9;
+        encoding |= (self.m_p_bit as u16) << 8;
+        encoding |= self.register_list as u16;
+        encoding
+    }
+}
+
+pub trait Encoding {
+    fn encode(&self) -> u16;
+}
+

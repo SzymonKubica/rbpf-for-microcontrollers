@@ -15,8 +15,8 @@ use stdlib::collections::BTreeMap as HashMap;
 use stdlib::collections::Vec;
 use stdlib::{Error, ErrorKind, String};
 
-use thumbv7em::*;
 use ebpf;
+use thumbv7em::*;
 
 /// The jit-compiled code can then be called as a function
 type MachineCode = unsafe fn(*mut u8, usize, *mut u8, usize, usize, usize) -> u64;
@@ -37,7 +37,6 @@ enum OperandSize {
     S32 = 32,
     S64 = 64,
 }
-
 
 const REGISTER_MAP_SIZE: usize = 11;
 const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
@@ -62,16 +61,14 @@ fn map_register(r: u8) -> u8 {
     REGISTER_MAP[(r % REGISTER_MAP_SIZE as u8) as usize]
 }
 
-macro_rules! emit_bytes {
-    ( $mem:ident, $data:tt, $t:ty ) => {{
-        let size = core::mem::size_of::<$t>() as usize;
-        assert!($mem.offset + size <= $mem.contents.len());
-        unsafe {
-            let mut ptr = $mem.contents.as_ptr().add($mem.offset) as *mut $t;
-            ptr.write_unaligned($data);
-        }
-        $mem.offset += size;
-    }};
+#[inline]
+pub fn emit<T>(mem: &mut JitMemory, data: T) {
+    unsafe {
+        let ptr = mem.contents.as_ptr().add(mem.offset);
+        #[allow(clippy::cast_ptr_alignment)]
+        core::ptr::write_unaligned(ptr as *mut T, data as T);
+    }
+    mem.offset += core::mem::size_of::<T>();
 }
 
 #[derive(Debug)]
@@ -96,414 +93,42 @@ impl JitCompiler {
         }
     }
 
-    fn emit1(&self, mem: &mut JitMemory, data: u8) {
-        emit_bytes!(mem, data, u8);
-    }
-
-    fn emit2(&self, mem: &mut JitMemory, data: u16) {
-        emit_bytes!(mem, data, u16);
-    }
-
-    fn emit4(&self, mem: &mut JitMemory, data: u32) {
-        emit_bytes!(mem, data, u32);
-    }
-
-    fn emit8(&self, mem: &mut JitMemory, data: u64) {
-        emit_bytes!(mem, data, u64);
-    }
-
-    fn emit_modrm(&self, mem: &mut JitMemory, modrm: u8, r: u8, m: u8) {
-        assert_eq!((modrm | 0xc0), 0xc0);
-        self.emit1(mem, (modrm & 0xc0) | ((r & 0b111) << 3) | (m & 0b111));
-    }
-
-    fn emit_modrm_reg2reg(&self, mem: &mut JitMemory, r: u8, m: u8) {
-        self.emit_modrm(mem, 0xc0, r, m);
-    }
-
-    fn emit_rex(&self, mem: &mut JitMemory, w: u8, r: u8, x: u8, b: u8) {
-        assert_eq!((w | 1), 1);
-        assert_eq!((r | 1), 1);
-        assert_eq!((x | 1), 1);
-        assert_eq!((b | 1), 1);
-        self.emit1(mem, 0x40 | (w << 3) | (r << 2) | (x << 1) | b);
-    }
-
-    // Emits a REX prefix with the top bit of src and dst.
-    // Skipped if no bits would be set.
-    fn emit_basic_rex(&self, mem: &mut JitMemory, w: u8, src: u8, dst: u8) {
-        if self.basix_rex_would_set_bits(w, src, dst) {
-            let is_masked = |val, mask| match val & mask {
-                0 => 0,
-                _ => 1,
-            };
-            self.emit_rex(mem, w, is_masked(src, 8), 0, is_masked(dst, 8));
-        }
-    }
-
-    fn basix_rex_would_set_bits(&self, w: u8, src: u8, dst: u8) -> bool {
-        w != 0 || (src & 0b1000) != 0 || (dst & 0b1000) != 0
-    }
-
-    fn emit_push(&self, mem: &mut JitMemory, r: u8) {
-        let template: u32 = 0b11111000010011010000110100000100;
-        self.emit4(mem, template | (r as u32 & 0b1111) as u32);
-    }
 
     /// Allows for pushing multiple registers onto the stack (can include LR)
     fn emit_push_multiple(&self, mem: &mut JitMemory, register_list: &[u8]) {
-        let mut template: u16 = 0b1011010 << 9;
+        let mut reg_list: u8 = 0;
         for reg in register_list {
-            if *reg == LR {
-                template |= 1 << 8;
-            } else {
-                template |= 1 << reg;
-            }
+            reg_list |= 1 << reg;
         }
+        const PUSH_OPCODE: u8 = 0b010;
+        let m = if register_list.contains(&LR) { 1 } else { 0 };
 
-        self.emit2(mem, template);
+        let instr = ThumbInstruction::PushMultipleRegisters(PushPopEncoding::new(PUSH_OPCODE, m, reg_list));
+
     }
 
     /// Allows for popping multiple registers from the stack (can include PC)
     fn emit_pop_multiple(&self, mem: &mut JitMemory, register_list: &[u8]) {
-        let mut template: u16 = 0b1011110 << 9;
+        let mut reg_list: u8 = 0;
         for reg in register_list {
-            if *reg == PC {
-                template |= 1 << 8;
-            } else {
-                template |= 1 << reg;
-            }
+            reg_list |= 1 << reg;
         }
+        const POP_OPCODE: u8 = 0b110;
+        let p = if register_list.contains(&PC) { 1 } else { 0 };
 
-        self.emit2(mem, template);
-    }
-
-    fn emit_pop(&self, mem: &mut JitMemory, r: u8) {
-        self.emit_basic_rex(mem, 0, 0, r);
-        let template: u32 = 0b11111000010111010000101100000100;
-        self.emit4(mem, template | (r as u32 & 0b1111) as u32);
-    }
-
-    fn emit_modrm_and_displacement(&self, mem: &mut JitMemory, r: u8, m: u8, d: i32) {
-        if d == 0 && (m & 0b111) != R5 {
-            self.emit_modrm(mem, 0x00, r, m);
-        } else if (-128..=127).contains(&d) {
-            self.emit_modrm(mem, 0x40, r, m);
-            self.emit1(mem, d as u8);
-        } else {
-            self.emit_modrm(mem, 0x80, r, m);
-            self.emit4(mem, d as u32);
-        }
-    }
-
-    // REX prefix and ModRM byte
-    // We use the MR encoding when there is a choice
-    // 'src' is often used as an opcode extension
-    fn emit_alu32(&self, mem: &mut JitMemory, op: u8, src: u8, dst: u8) {
-        self.emit_basic_rex(mem, 0, src, dst);
-        self.emit1(mem, op);
-        self.emit_modrm_reg2reg(mem, src, dst);
-    }
-
-    // REX prefix, ModRM byte, and 32-bit immediate
-    fn emit_alu32_imm32(&self, mem: &mut JitMemory, op: u8, src: u8, dst: u8, imm: i32) {
-        self.emit_alu32(mem, op, src, dst);
-        self.emit4(mem, imm as u32);
-    }
-
-    // REX prefix, ModRM byte, and 8-bit immediate
-    fn emit_alu32_imm8(&self, mem: &mut JitMemory, op: u8, src: u8, dst: u8, imm: i8) {
-        self.emit_alu32(mem, op, src, dst);
-        self.emit1(mem, imm as u8);
-    }
-
-    // REX.W prefix and ModRM byte
-    // We use the MR encoding when there is a choice
-    // 'src' is often used as an opcode extension
-    fn emit_alu64(&self, mem: &mut JitMemory, op: u8, src: u8, dst: u8) {
-        self.emit_basic_rex(mem, 1, src, dst);
-        self.emit1(mem, op);
-        self.emit_modrm_reg2reg(mem, src, dst);
-    }
-
-    // REX.W prefix, ModRM byte, and 32-bit immediate
-    fn emit_alu64_imm32(&self, mem: &mut JitMemory, op: u8, src: u8, dst: u8, imm: i32) {
-        self.emit_alu64(mem, op, src, dst);
-        self.emit4(mem, imm as u32);
-    }
-
-    // REX.W prefix, ModRM byte, and 8-bit immediate
-    fn emit_alu64_imm8(&self, mem: &mut JitMemory, op: u8, src: u8, dst: u8, imm: i8) {
-        self.emit_alu64(mem, op, src, dst);
-        self.emit1(mem, imm as u8);
-    }
-
-    // Register to register mov
-    fn emit_mov(&self, mem: &mut JitMemory, src: u8, dst: u8) {
-        self.emit_alu64(mem, 0x89, src, dst);
-    }
-
-    fn emit_mov_imm8(&self, mem: &mut JitMemory, imm: u8, dst: u8) {
-        let template: u16 = 0b00100 << 11;
-        self.emit2(mem, template | ((dst as u16) << 8) | imm as u16);
-    }
-
-    fn emit_mov_imm16_long(&self, mem: &mut JitMemory, imm: u16, dst: u8) {
-        let template: u32 = 0b11110010010000000 << 15;
-        let i = (imm & (1 << 11)) as u32;
-        let imm4 = (imm & (0b1111 << 12)) as u32;
-        let imm3 = (imm & (0b111 << 8)) as u32;
-        let imm8 = (imm & 0b11111111) as u32;
-        let output = template | (imm4 << 15) | (i << 24) | (imm3 << 11) | imm8;
-        self.emit4(mem, output);
-    }
-
-    fn emit_cmp_imm32(&self, mem: &mut JitMemory, dst: u8, imm: i32) {
-        self.emit_alu64_imm32(mem, 0x81, 7, dst, imm);
-    }
-
-    fn emit_cmp(&self, mem: &mut JitMemory, src: u8, dst: u8) {
-        self.emit_alu64(mem, 0x39, src, dst);
-    }
-
-    fn emit_cmp32_imm32(&self, mem: &mut JitMemory, dst: u8, imm: i32) {
-        self.emit_alu32_imm32(mem, 0x81, 7, dst, imm);
-    }
-
-    fn emit_cmp32(&self, mem: &mut JitMemory, src: u8, dst: u8) {
-        self.emit_alu32(mem, 0x39, src, dst);
-    }
-
-    // Load [src + offset] into dst
-    fn emit_load(&self, mem: &mut JitMemory, size: OperandSize, src: u8, dst: u8, offset: i32) {
-        let data = match size {
-            OperandSize::S64 => 1,
-            _ => 0,
-        };
-        self.emit_basic_rex(mem, data, dst, src);
-
-        match size {
-            OperandSize::S8 => {
-                // movzx
-                self.emit1(mem, 0x0f);
-                self.emit1(mem, 0xb6);
-            }
-            OperandSize::S16 => {
-                // movzx
-                self.emit1(mem, 0x0f);
-                self.emit1(mem, 0xb7);
-            }
-            OperandSize::S32 | OperandSize::S64 => {
-                // mov
-                self.emit1(mem, 0x8b);
-            }
-        }
-
-        self.emit_modrm_and_displacement(mem, dst, src, offset);
-    }
-
-    // Load sign-extended immediate into register
-    fn emit_load_imm(&self, mem: &mut JitMemory, dst: u8, imm: i64) {
-        if imm >= core::i32::MIN as i64 && imm <= core::i32::MAX as i64 {
-            self.emit_alu64_imm32(mem, 0xc7, 0, dst, imm as i32);
-        } else {
-            // movabs $imm,dst
-            self.emit_basic_rex(mem, 1, 0, dst);
-            self.emit1(mem, 0xb8 | (dst & 0b111));
-            self.emit8(mem, imm as u64);
-        }
-    }
-
-    // Store register src to [dst + offset]
-    fn emit_store(&self, mem: &mut JitMemory, size: OperandSize, src: u8, dst: u8, offset: i32) {
-        match size {
-            OperandSize::S16 => self.emit1(mem, 0x66), // 16-bit override
-            _ => {}
-        };
-        let (is_s8, is_u64, rexw) = match size {
-            OperandSize::S8 => (true, false, 0),
-            OperandSize::S64 => (false, true, 1),
-            _ => (false, false, 0),
-        };
-        if is_u64 || (src & 0b1000) != 0 || (dst & 0b1000) != 0 || is_s8 {
-            let is_masked = |val, mask| match val & mask {
-                0 => 0,
-                _ => 1,
-            };
-            self.emit_rex(mem, rexw, is_masked(src, 8), 0, is_masked(dst, 8));
-        }
-        match size {
-            OperandSize::S8 => self.emit1(mem, 0x88),
-            _ => self.emit1(mem, 0x89),
-        };
-        self.emit_modrm_and_displacement(mem, src, dst, offset);
-    }
-
-    // Store immediate to [dst + offset]
-    fn emit_store_imm32(
-        &self,
-        mem: &mut JitMemory,
-        size: OperandSize,
-        dst: u8,
-        offset: i32,
-        imm: i32,
-    ) {
-        match size {
-            OperandSize::S16 => self.emit1(mem, 0x66), // 16-bit override
-            _ => {}
-        };
-        match size {
-            OperandSize::S64 => self.emit_basic_rex(mem, 1, 0, dst),
-            _ => self.emit_basic_rex(mem, 0, 0, dst),
-        };
-        match size {
-            OperandSize::S8 => self.emit1(mem, 0xc6),
-            _ => self.emit1(mem, 0xc7),
-        };
-        self.emit_modrm_and_displacement(mem, 0, dst, offset);
-        match size {
-            OperandSize::S8 => self.emit1(mem, imm as u8),
-            OperandSize::S16 => self.emit2(mem, imm as u16),
-            _ => self.emit4(mem, imm as u32),
-        };
-    }
-
-    fn emit_direct_jcc(&self, mem: &mut JitMemory, code: u8, offset: u32) {
-        self.emit1(mem, 0x0f);
-        self.emit1(mem, code);
-        emit_bytes!(mem, offset, u32);
-    }
-
-    fn emit_call(&self, mem: &mut JitMemory, target: usize) {
-        // TODO use direct call when possible
-        self.emit_load_imm(mem, R0, target as i64);
-        // callq *%R0
-        self.emit1(mem, 0xff);
-        self.emit1(mem, 0xd0);
-    }
-
-    fn emit_jump_offset(&mut self, mem: &mut JitMemory, target_pc: isize) {
-        let jump = Jump {
-            offset_loc: mem.offset,
-            target_pc,
-        };
-        self.jumps.push(jump);
-        self.emit4(mem, 0);
-    }
-
-    fn emit_jcc(&mut self, mem: &mut JitMemory, code: u8, target_pc: isize) {
-        self.emit1(mem, 0x0f);
-        self.emit1(mem, code);
-        self.emit_jump_offset(mem, target_pc);
+        let instr = ThumbInstruction::PopMultipleRegisters(PushPopEncoding::new(POP_OPCODE, p, reg_list));
+        instr.emit(mem);
     }
 
     // This is supposed to allow us to jump back to LR.
     fn emit_b(&mut self, mem: &mut JitMemory, reg: u8) {
         let template: u16 = 0b0100011100000000;
-        self.emit2(mem, template | ((reg & 0b1111) << 3) as u16);
+        emit::<u16>(mem, template | ((reg & 0b1111) << 3) as u16);
     }
 
-    fn emit_jmp(&mut self, mem: &mut JitMemory, target_pc: isize) {
-        self.emit1(mem, 0xe9);
-        self.emit_jump_offset(mem, target_pc);
-    }
-
-    fn set_anchor(&mut self, mem: &mut JitMemory, target: isize) {
-        self.special_targets.insert(target, mem.offset);
-    }
-
-    fn emit_muldivmod(
-        &mut self,
-        mem: &mut JitMemory,
-        pc: u16,
-        opc: u8,
-        src: u8,
-        dst: u8,
-        imm: i32,
-    ) {
-        let mul = (opc & ebpf::BPF_ALU_OP_MASK) == (ebpf::MUL32_IMM & ebpf::BPF_ALU_OP_MASK);
-        let div = (opc & ebpf::BPF_ALU_OP_MASK) == (ebpf::DIV32_IMM & ebpf::BPF_ALU_OP_MASK);
-        let modrm = (opc & ebpf::BPF_ALU_OP_MASK) == (ebpf::MOD32_IMM & ebpf::BPF_ALU_OP_MASK);
-        let is64 = (opc & ebpf::BPF_CLS_MASK) == ebpf::BPF_ALU64;
-        let is_reg = (opc & ebpf::BPF_X) == ebpf::BPF_X;
-
-        if (div || mul) && !is_reg && imm == 0 {
-            // Division by zero returns 0
-            // Set register to 0: xor with itself
-            self.emit_alu32(mem, 0x31, dst, dst);
-            return;
-        }
-        if modrm && !is_reg && imm == 0 {
-            // Modulo remainder of division by zero keeps destination register unchanged
-            return;
-        }
-        if (div || modrm) && is_reg {
-            self.emit_load_imm(mem, R1, pc as i64);
-
-            // test src,src
-            if is64 {
-                self.emit_alu64(mem, 0x85, src, src);
-            } else {
-                self.emit_alu32(mem, 0x85, src, src);
-            }
-
-            if div {
-                // No division by 0: skip next instructions
-                // Jump offset: emit_alu32 adds 2 to 3 bytes, emit_jmp adds 5
-                let offset = match self.basix_rex_would_set_bits(0, dst, dst) {
-                    true => 3 + 5,
-                    false => 2 + 5,
-                };
-                self.emit_direct_jcc(mem, 0x85, offset);
-                // Division by 0: set dst to 0 then go to next instruction
-                // Set register to 0: xor with itself
-                self.emit_alu32(mem, 0x31, dst, dst);
-                self.emit_jmp(mem, (pc + 1) as isize);
-            }
-            if modrm {
-                // Modulo by zero: keep destination register unchanged
-                self.emit_jcc(mem, 0x84, (pc + 1) as isize);
-            }
-        }
-
-        if dst != R0 {
-            self.emit_push(mem, R0);
-        }
-        if dst != R2 {
-            self.emit_push(mem, R2);
-        }
-        if imm != 0 {
-            self.emit_load_imm(mem, R1, imm as i64);
-        } else {
-            self.emit_mov(mem, src, R1);
-        }
-
-        self.emit_mov(mem, dst, R0);
-
-        if div || modrm {
-            // Set register to 0: xor %edx,%edx
-            self.emit_alu32(mem, 0x31, R2, R2);
-        }
-
-        if is64 {
-            self.emit_rex(mem, 1, 0, 0, 0);
-        }
-
-        // mul %ecx or div %ecx
-        self.emit_alu32(mem, 0xf7, if mul { 4 } else { 6 }, R1);
-
-        if dst != R2 {
-            if modrm {
-                self.emit_mov(mem, R2, dst);
-            }
-            self.emit_pop(mem, R2);
-        }
-        if dst != R0 {
-            if div || mul {
-                self.emit_mov(mem, R0, dst);
-            }
-            self.emit_pop(mem, R0);
-        }
+    fn emit_mov_imm8(&self, mem: &mut JitMemory, imm: u8, dst: u8) {
+        let template: u16 = 0b00100 << 11;
+        emit::<u16>(mem, template | ((dst as u16) << 8) | imm as u16);
     }
 
     pub fn jit_compile(
@@ -970,7 +595,7 @@ impl JitCompiler {
         */
 
         // Epilogue
-        self.set_anchor(mem, TARGET_PC_EXIT);
+        //self.set_anchor(mem, TARGET_PC_EXIT);
 
         // Move register 0 into R0
         if map_register(0) != R0 {
