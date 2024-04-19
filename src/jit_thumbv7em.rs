@@ -84,6 +84,9 @@ pub struct JitCompiler {
     jumps: Vec<Jump>,
 }
 
+/// Type alias for conciseness
+type I = ThumbInstruction;
+
 impl JitCompiler {
     pub fn new() -> JitCompiler {
         JitCompiler {
@@ -112,10 +115,9 @@ impl JitCompiler {
         update_data_ptr: bool,
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
-        ThumbInstruction::PushMultipleRegisters {
-            registers: vec![R4, R5, R6, R7, LR],
-        }
-        .emit(mem);
+        //  Save callee-saved registers
+        let registers = vec![R4, R5, R6, R7, LR];
+        I::PushMultipleRegisters { registers }.emit_into(mem);
 
         // R7: mbuff
         // RSI: mbuff_len
@@ -167,14 +169,9 @@ impl JitCompiler {
         // Subtract eBPF stack size from STACK pointer. Given that our instruction
         // allows for shifting the stack by at most 4*127 bytes at once, we need
         // to do this twice to achieve the stack size of 512 used by eBPF.
-        ThumbInstruction::SubtractImmediateFromSP {
-            immediate_offset: ebpf::STACK_SIZE as u16 / 2
-        }
-        .emit(mem);
-        ThumbInstruction::SubtractImmediateFromSP {
-            immediate_offset: ebpf::STACK_SIZE as u16 / 2
-        }
-        .emit(mem);
+        let offset = ebpf::STACK_SIZE as u16 / 2;
+        I::SubtractImmediateFromSP { imm: offset }.emit_into(mem);
+        I::SubtractImmediateFromSP { imm: offset }.emit_into(mem);
 
         self.pc_locs = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
 
@@ -587,21 +584,15 @@ impl JitCompiler {
         // Deallocate stack space
         // The add immediate to SP instruction allows for at most 4*127 bytes
         // being shifted, so we need to do this twice to shift the stack by 512 bytes.
-        ThumbInstruction::AddImmediateToSP {
-            immediate_offset: ebpf::STACK_SIZE as u16 / 2
-        }
-        .emit(mem);
-        ThumbInstruction::AddImmediateToSP {
-            immediate_offset: ebpf::STACK_SIZE as u16 / 2
-        }
-        .emit(mem);
+        let offset = ebpf::STACK_SIZE as u16 / 2;
+        I::AddImmediateToSP { imm: offset }.emit_into(mem);
+        I::AddImmediateToSP { imm: offset }.emit_into(mem);
 
         self.emit_mov_imm8(mem, 123, R0);
 
-        ThumbInstruction::PopMultipleRegisters {
-            registers: vec![R4, R5, R6, R7, PC],
-        }
-        .emit(mem);
+        // Restore callee-saved registers
+        let registers = vec![R4, R5, R6, R7, PC];
+        I::PopMultipleRegisters { registers }.emit_into(mem);
 
         self.emit_b(mem, LR);
 

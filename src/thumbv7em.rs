@@ -89,8 +89,8 @@ pub enum ThumbInstruction {
     LoadRegisterSPRelativeImmediate,
     // Miscellaneous 16-bit instructions
     ChangeProcessorStateCPSon,
-    AddImmediateToSP { immediate_offset: u16 },
-    SubtractImmediateFromSP { immediate_offset: u16 },
+    AddImmediateToSP { imm: u16 },
+    SubtractImmediateFromSP { imm: u16 },
     CompareAndBranchOnZero,
     SignedExtendHalfword,
     SignedExtendByte,
@@ -116,7 +116,7 @@ pub enum ThumbInstruction {
 }
 
 impl ThumbInstruction {
-    pub fn emit(&self, mem: &mut JitMemory) {
+    pub fn emit_into(&self, mem: &mut JitMemory) {
         let encoding = match self {
             ThumbInstruction::LogicalShiftLeftImmediate => todo!(),
             ThumbInstruction::LogicalShiftRightImmediate => todo!(),
@@ -167,12 +167,12 @@ impl ThumbInstruction {
             ThumbInstruction::StoreRegisterSPRelativeImmediate => todo!(),
             ThumbInstruction::LoadRegisterSPRelativeImmediate => todo!(),
             ThumbInstruction::ChangeProcessorStateCPSon => todo!(),
-            ThumbInstruction::AddImmediateToSP { immediate_offset } => {
+            ThumbInstruction::AddImmediateToSP { imm: immediate_offset } => {
                 const ADD_OPCODE: u8 = 0b1;
                 SPPlusMinusImmediateEncoding::new(ADD_OPCODE, *immediate_offset).encode()
             }
 
-            ThumbInstruction::SubtractImmediateFromSP { immediate_offset } => {
+            ThumbInstruction::SubtractImmediateFromSP { imm: immediate_offset } => {
                 const SUBTRACT_OPCODE: u8 = 0b0;
                 SPPlusMinusImmediateEncoding::new(SUBTRACT_OPCODE, *immediate_offset).encode()
             }
