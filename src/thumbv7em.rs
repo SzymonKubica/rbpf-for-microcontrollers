@@ -88,31 +88,29 @@ pub enum ThumbInstruction {
     StoreRegisterSPRelativeImmediate { imm8: u8, rt: u8 },
     LoadRegisterSPRelativeImmediate { imm8: u8, rt: u8 },
     // Miscellaneous 16-bit instructions
-    ChangeProcessorState,
     AddImmediateToSP { imm: u16 },
     SubtractImmediateFromSP { imm: u16 },
-    CompareAndBranchOnZero,
-    SignedExtendHalfword,
-    SignedExtendByte,
-    UnsignedExtendHalfword,
-    UnsignedExtendByte,
+    CompareAndBranchOnZero { i: u8, imm5: u8, rn: u8 },
+    SignedExtendHalfword { rm: u8, rd: u8 },
+    SignedExtendByte { rm: u8, rd: u8 },
+    UnsignedExtendHalfword { rm: u8, rd: u8 },
+    UnsignedExtendByte { rm: u8, rd: u8 },
     PushMultipleRegisters { registers: Vec<u8> },
-    ByteReverseWord,
-    ByteReversePackedHalfword,
-    ByteReverseSignedHalfword,
-    CompareAndBranchOnNonZero,
+    ByteReverseWord { rm: u8, rd: u8 },
+    ByteReversePackedHalfword { rm: u8, rd: u8 },
+    ByteReverseSignedHalfword { rm: u8, rd: u8 },
+    CompareAndBranchOnNonZero { i: u8, imm5: u8, rn: u8 },
     PopMultipleRegisters { registers: Vec<u8> },
-    Breakpoint,
-    // If-Then and hints
-    IfThen,
-    NoOperationHint,
-    YieldHint,
-    WaitForEventHint,
-    WaitForInterruptHint,
-    SendEventHint,
+    // If-Then and hints (not useful for now)
+    // IfThen,
+    // NoOperationHint,
+    // YieldHint,
+    // WaitForEventHint,
+    // WaitForInterruptHint,
+    // SendEventHint,
     // Conditional branch and supervisor call
-    ConditionalBranch,
-    SupervisorCall,
+    ConditionalBranch { cond: u8, imm8: u8 },
+    //SupervisorCall,
 }
 
 impl ThumbInstruction {
@@ -166,67 +164,67 @@ impl ThumbInstruction {
             // Data processing (operate mostly on registers)
             ThumbInstruction::BitwiseAND { rm, rd } => {
                 const AND_OPCODE: u8 = 0b0000;
-                TwoRegistersEncoding::new(AND_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, AND_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::ExclusiveOR { rm, rd } => {
                 const EOR_OPCODE: u8 = 0b0001;
-                TwoRegistersEncoding::new(EOR_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, EOR_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::LogicalShiftLeft { rm, rd } => {
                 const LSL_OPCODE: u8 = 0b0010;
-                TwoRegistersEncoding::new(LSL_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, LSL_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::LogicalShiftRight { rm, rd } => {
                 const LSR_OPCODE: u8 = 0b0011;
-                TwoRegistersEncoding::new(LSR_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, LSR_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::ArithmeticShiftRight { rm, rd } => {
                 const ASR_OPCODE: u8 = 0b0100;
-                TwoRegistersEncoding::new(ASR_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, ASR_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::AddWithCarry { rm, rd } => {
                 const ADC_OPCODE: u8 = 0b0101;
-                TwoRegistersEncoding::new(ADC_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, ADC_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::SubtractWithCarry { rm, rd } => {
                 const SBC_OPCODE: u8 = 0b0110;
-                TwoRegistersEncoding::new(SBC_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, SBC_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::RotateRight { rm, rd } => {
                 const ROR_OPCODE: u8 = 0b0111;
-                TwoRegistersEncoding::new(ROR_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, ROR_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::SetFlagsOnBitwiseAND { rm, rd } => {
                 const TST_OPCODE: u8 = 0b1000;
-                TwoRegistersEncoding::new(TST_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, TST_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::ReverseSubtractFrom0 { rm, rd } => {
                 const RSB_OPCODE: u8 = 0b1001;
-                TwoRegistersEncoding::new(RSB_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, RSB_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::Compare { rm, rd } => {
                 const CMP_OPCODE: u8 = 0b1010;
-                TwoRegistersEncoding::new(CMP_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, CMP_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::CompareNegative { rm, rd } => {
                 const CMN_OPCODE: u8 = 0b1011;
-                TwoRegistersEncoding::new(CMN_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, CMN_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::LogicalOR { rm, rd } => {
                 const ORR_OPCODE: u8 = 0b1100;
-                TwoRegistersEncoding::new(ORR_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, ORR_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::MultiplyTwoRegisters { rm, rd } => {
                 const MUL_OPCODE: u8 = 0b1101;
-                TwoRegistersEncoding::new(MUL_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, MUL_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::BitClear { rm, rd } => {
                 const BIC_OPCODE: u8 = 0b1110;
-                TwoRegistersEncoding::new(BIC_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, BIC_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::BitwiseNOT { rm, rd } => {
                 const MVN_OPCODE: u8 = 0b1111;
-                TwoRegistersEncoding::new(MVN_OPCODE, *rm, *rd).encode()
+                TwoRegistersEncoding::new(DATA_PROCESSING, MVN_OPCODE, *rm, *rd).encode()
             }
             // Special data instructions and branch and exchange
             ThumbInstruction::AddRegistersSpecial { d, rm, rd } => {
@@ -330,7 +328,6 @@ impl ThumbInstruction {
                 const STR_OPCODE: u8 = 0b1;
                 Immediate8OneRegisterEncoding::new(OP_A, STR_OPCODE, *imm8, *rt).encode()
             }
-            ThumbInstruction::ChangeProcessorState => todo!(),
             // Miscellaneous 16-bit instructions
             ThumbInstruction::AddImmediateToSP {
                 imm: immediate_offset,
@@ -345,11 +342,25 @@ impl ThumbInstruction {
                 const SUBTRACT_OPCODE: u8 = 0b0;
                 SPPlusMinusImmediateEncoding::new(SUBTRACT_OPCODE, *immediate_offset).encode()
             }
-            ThumbInstruction::CompareAndBranchOnZero => todo!(),
-            ThumbInstruction::SignedExtendHalfword => todo!(),
-            ThumbInstruction::SignedExtendByte => todo!(),
-            ThumbInstruction::UnsignedExtendHalfword => todo!(),
-            ThumbInstruction::UnsignedExtendByte => todo!(),
+            ThumbInstruction::CompareAndBranchOnZero { i, imm5, rn } => {
+                CompareAndBranchEncoding::new(0b0, *i, *imm5, *rn).encode()
+            }
+            ThumbInstruction::SignedExtendHalfword { rm, rd } => {
+                const STXH_OPCODE: u8 = 0b001000;
+                TwoRegistersEncoding::new(MISCELLANEOUS, STXH_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::SignedExtendByte { rm, rd } => {
+                const STXB_OPCODE: u8 = 0b001001;
+                TwoRegistersEncoding::new(MISCELLANEOUS, STXB_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::UnsignedExtendHalfword { rm, rd } => {
+                const UTXH_OPCODE: u8 = 0b001010;
+                TwoRegistersEncoding::new(MISCELLANEOUS, UTXH_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::UnsignedExtendByte { rm, rd } => {
+                const UTXB_OPCODE: u8 = 0b001011;
+                TwoRegistersEncoding::new(MISCELLANEOUS, UTXB_OPCODE, *rm, *rd).encode()
+            }
             ThumbInstruction::PushMultipleRegisters { registers } => {
                 const PUSH_OPCODE: u8 = 0b010;
                 let mut reg_list: u8 = 0;
@@ -362,10 +373,21 @@ impl ThumbInstruction {
 
                 PushPopEncoding::new(PUSH_OPCODE, m, reg_list).encode()
             }
-            ThumbInstruction::ByteReverseWord => todo!(),
-            ThumbInstruction::ByteReversePackedHalfword => todo!(),
-            ThumbInstruction::ByteReverseSignedHalfword => todo!(),
-            ThumbInstruction::CompareAndBranchOnNonZero => todo!(),
+            ThumbInstruction::ByteReverseWord { rm, rd } => {
+                const REV_OPCODE: u8 = 0b101000;
+                TwoRegistersEncoding::new(MISCELLANEOUS, REV_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::ByteReversePackedHalfword { rm, rd } => {
+                const REV16_OPCODE: u8 = 0b101001;
+                TwoRegistersEncoding::new(MISCELLANEOUS, REV16_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::ByteReverseSignedHalfword { rm, rd } => {
+                const REVSH_OPCODE: u8 = 0b101011;
+                TwoRegistersEncoding::new(MISCELLANEOUS, REVSH_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::CompareAndBranchOnNonZero { i, imm5, rn } => {
+                CompareAndBranchEncoding::new(0b1, *i, *imm5, *rn).encode()
+            }
             ThumbInstruction::PopMultipleRegisters { registers } => {
                 let mut reg_list: u8 = 0;
                 for reg in registers {
@@ -378,16 +400,18 @@ impl ThumbInstruction {
 
                 PushPopEncoding::new(POP_OPCODE, p, reg_list).encode()
             }
+            //ThumbInstruction::Breakpoint => todo!(),
+            //ThumbInstruction::IfThen => todo!(),
+            //ThumbInstruction::NoOperationHint => todo!(),
+            //ThumbInstruction::YieldHint => todo!(),
+            //ThumbInstruction::WaitForEventHint => todo!(),
+            //ThumbInstruction::WaitForInterruptHint => todo!(),
+            //ThumbInstruction::SendEventHint => todo!(),
+            //ThumbInstruction::SupervisorCall => todo!(),
+            ThumbInstruction::ConditionalBranch { cond, imm8 } => {
+                ConditionalBranchEncoding::new(*cond, *imm8).encode()
+            }
 
-            ThumbInstruction::Breakpoint => todo!(),
-            ThumbInstruction::IfThen => todo!(),
-            ThumbInstruction::NoOperationHint => todo!(),
-            ThumbInstruction::YieldHint => todo!(),
-            ThumbInstruction::WaitForEventHint => todo!(),
-            ThumbInstruction::WaitForInterruptHint => todo!(),
-            ThumbInstruction::SendEventHint => todo!(),
-            ThumbInstruction::ConditionalBranch => todo!(),
-            ThumbInstruction::SupervisorCall => todo!(),
         };
 
         emit::<u16>(mem, encoding)
@@ -684,9 +708,14 @@ pub struct TwoRegistersEncoding {
 }
 
 impl TwoRegistersEncoding {
-    pub fn new(opcode: u8, rm: u8, rd: u8) -> TwoRegistersEncoding {
+    pub fn new(
+        class_opcode: InstructionClassOpcode,
+        opcode: u8,
+        rm: u8,
+        rd: u8,
+    ) -> TwoRegistersEncoding {
         TwoRegistersEncoding {
-            class_opcode: DATA_PROCESSING,
+            class_opcode,
             opcode,
             rm,
             rd,
@@ -698,7 +727,14 @@ impl Encoding for TwoRegistersEncoding {
     fn encode(&self) -> u16 {
         let mut encoding = 0;
         self.class_opcode.apply(&mut encoding);
-        encoding |= (self.opcode as u16 & 0b1111) << 6;
+        // The first one is used in case of DATA_PROCESSING instruction class and the
+        // second one is used for the MISCELLANEOUS UXTH.. etc.
+        let opcode_mask = match self.class_opcode.opcode_length {
+            6 => 0b1111,
+            4 => 0b111111,
+            _ => panic!("Unexpected opcode length in Immediate5TwoRegistersEncoding"),
+        };
+        encoding |= (self.opcode as u16 & opcode_mask) << 6;
         encoding |= (self.rm as u16 & 0b111) << 3;
         encoding |= self.rd as u16 & 0b111;
         encoding
@@ -759,6 +795,65 @@ impl Encoding for SpecialBranchEncoding {
         self.class_opcode.apply(&mut encoding);
         encoding |= (self.opcode as u16 & 0b111) << 7;
         encoding |= (self.rm as u16 & 0b111) << 3;
+        encoding
+    }
+}
+
+pub struct CompareAndBranchEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    i: u8,
+    imm5: u8,
+    rn: u8,
+}
+
+impl CompareAndBranchEncoding {
+    pub fn new(opcode: u8, i: u8, imm5: u8, rn: u8) -> CompareAndBranchEncoding {
+        CompareAndBranchEncoding {
+            class_opcode: MISCELLANEOUS,
+            opcode,
+            i,
+            imm5,
+            rn,
+        }
+    }
+}
+
+impl Encoding for CompareAndBranchEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b1) << 11;
+        encoding |= (self.i as u16 & 0b1) << 9;
+        encoding |= 0b1 << 8;
+        encoding |= (self.imm5 as u16 & 0b11111) << 3;
+        encoding |= self.rn as u16 & 0b111;
+        encoding
+    }
+}
+
+pub struct ConditionalBranchEncoding {
+    class_opcode: InstructionClassOpcode,
+    cond: u8,
+    imm8: u8,
+}
+
+impl ConditionalBranchEncoding {
+    pub fn new(cond: u8, imm8: u8) -> ConditionalBranchEncoding {
+        ConditionalBranchEncoding {
+            class_opcode: COND_BRANCH_AND_SUPERVISOR_CALL,
+            cond,
+            imm8,
+        }
+    }
+}
+
+impl Encoding for ConditionalBranchEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.cond as u16 & 0b1111) << 8;
+        encoding |= self.imm8 as u16 & 0b11111111;
         encoding
     }
 }
