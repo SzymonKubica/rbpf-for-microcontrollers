@@ -1,4 +1,5 @@
-use crate::{JitMemory, jit_thumbv7em::emit};
+use crate::{jit_thumbv7em::emit, JitMemory};
+use stdlib::collections::Vec;
 
 // Registers
 pub const R0: u8 = 0;
@@ -88,19 +89,19 @@ pub enum ThumbInstruction {
     LoadRegisterSPRelativeImmediate,
     // Miscellaneous 16-bit instructions
     ChangeProcessorStateCPSon,
-    AddImmediateToSP,
-    SubtractImmediateFromSP,
+    AddImmediateToSP { immediate_offset: u16 },
+    SubtractImmediateFromSP { immediate_offset: u16 },
     CompareAndBranchOnZero,
     SignedExtendHalfword,
     SignedExtendByte,
     UnsignedExtendHalfword,
     UnsignedExtendByte,
-    PushMultipleRegisters(PushPopEncoding),
+    PushMultipleRegisters { registers: Vec<u8> },
     ByteReverseWord,
     ByteReversePackedHalfword,
     ByteReverseSignedHalfword,
     CompareAndBranchOnNonZero,
-    PopMultipleRegisters(PushPopEncoding),
+    PopMultipleRegisters { registers: Vec<u8> },
     Breakpoint,
     // If-Then and hints
     IfThen,
@@ -166,19 +167,49 @@ impl ThumbInstruction {
             ThumbInstruction::StoreRegisterSPRelativeImmediate => todo!(),
             ThumbInstruction::LoadRegisterSPRelativeImmediate => todo!(),
             ThumbInstruction::ChangeProcessorStateCPSon => todo!(),
-            ThumbInstruction::AddImmediateToSP => todo!(),
-            ThumbInstruction::SubtractImmediateFromSP => todo!(),
+            ThumbInstruction::AddImmediateToSP { immediate_offset } => {
+                const ADD_OPCODE: u8 = 0b1;
+                SPPlusMinusImmediateEncoding::new(ADD_OPCODE, *immediate_offset).encode()
+            }
+
+            ThumbInstruction::SubtractImmediateFromSP { immediate_offset } => {
+                const SUBTRACT_OPCODE: u8 = 0b0;
+                SPPlusMinusImmediateEncoding::new(SUBTRACT_OPCODE, *immediate_offset).encode()
+            }
             ThumbInstruction::CompareAndBranchOnZero => todo!(),
             ThumbInstruction::SignedExtendHalfword => todo!(),
             ThumbInstruction::SignedExtendByte => todo!(),
             ThumbInstruction::UnsignedExtendHalfword => todo!(),
             ThumbInstruction::UnsignedExtendByte => todo!(),
-            ThumbInstruction::PushMultipleRegisters(s) => s.encode(),
+            ThumbInstruction::PushMultipleRegisters { registers } => {
+                const PUSH_OPCODE: u8 = 0b010;
+                let mut reg_list: u8 = 0;
+                for reg in registers {
+                    if reg != &LR {
+                        reg_list |= 1 << reg;
+                    }
+                }
+                let m = if registers.contains(&LR) { 1 } else { 0 };
+
+                PushPopEncoding::new(PUSH_OPCODE, m, reg_list).encode()
+            }
             ThumbInstruction::ByteReverseWord => todo!(),
             ThumbInstruction::ByteReversePackedHalfword => todo!(),
             ThumbInstruction::ByteReverseSignedHalfword => todo!(),
             ThumbInstruction::CompareAndBranchOnNonZero => todo!(),
-            ThumbInstruction::PopMultipleRegisters(s) => s.encode(),
+            ThumbInstruction::PopMultipleRegisters { registers } => {
+                let mut reg_list: u8 = 0;
+                for reg in registers {
+                    if reg != &PC {
+                        reg_list |= 1 << reg;
+                    }
+                }
+                const POP_OPCODE: u8 = 0b110;
+                let p = if registers.contains(&PC) { 1 } else { 0 };
+
+                PushPopEncoding::new(POP_OPCODE, p, reg_list).encode()
+            }
+
             ThumbInstruction::Breakpoint => todo!(),
             ThumbInstruction::IfThen => todo!(),
             ThumbInstruction::NoOperationHint => todo!(),
@@ -193,8 +224,6 @@ impl ThumbInstruction {
         emit::<u16>(mem, encoding)
     }
 }
-
-
 
 // All instruction classes with their corresponding opcodes defined
 
@@ -240,23 +269,27 @@ impl InstructionClassOpcode {
     }
 }
 
+pub trait Encoding {
+    fn encode(&self) -> u16;
+}
+
 pub struct PushPopEncoding {
-    // The shared prefix common for all members of the class
+    /// The shared prefix common for all members of the class
     class_opcode: InstructionClassOpcode,
-    // 3 bits specifying whether we have push or pop
+    /// 3 bits specifying whether we have push or pop
     opcode: u8,
-    // The single bit in front of `register_list` specifying whether we
-    // push LR or pop PC
+    /// The single bit in front of `register_list` specifying whether we
+    /// push LR or pop PC
     m_p_bit: u8,
-    // The 8 bits of the register list, they allow for popping/pushing regs
-    // within range R0-R7
+    /// The 8 bits of the register list, they allow for popping/pushing regs
+    /// within range R0-R7
     register_list: u8,
 }
 
 impl PushPopEncoding {
     pub fn new(opcode: u8, m_p_bit: u8, register_list: u8) -> PushPopEncoding {
         PushPopEncoding {
-            class_opcode: SPECIAL_DATA_INSTRUCTIONS,
+            class_opcode: MISCELLANEOUS,
             opcode,
             m_p_bit,
             register_list,
@@ -268,14 +301,41 @@ impl Encoding for PushPopEncoding {
     fn encode(&self) -> u16 {
         let mut encoding = 0;
         self.class_opcode.apply(&mut encoding);
-        encoding |= (self.opcode as u16) << 9;
-        encoding |= (self.m_p_bit as u16) << 8;
+        encoding |= (self.opcode as u16 & 0b111) << 9;
+        encoding |= (self.m_p_bit as u16 & 0b1) << 8;
         encoding |= self.register_list as u16;
         encoding
     }
 }
 
-pub trait Encoding {
-    fn encode(&self) -> u16;
+pub struct SPPlusMinusImmediateEncoding {
+    // The shared prefix common for all members of the class
+    class_opcode: InstructionClassOpcode,
+    // 5 bits specifying the instruction class member
+    opcode: u8,
+    // 7 bits specifying the immediate operand. Note that the specification of
+    // the instruction shifts the immediate twice to the left, so the actual
+    // value is of the immediate `imm7 << 2`, becuause of this, we can shift
+    // the stack by at most 4 * 127 = 508 bytes.
+    immediate: u16,
 }
 
+impl SPPlusMinusImmediateEncoding {
+    pub fn new(opcode: u8, immediate: u16) -> SPPlusMinusImmediateEncoding {
+        SPPlusMinusImmediateEncoding {
+            class_opcode: MISCELLANEOUS,
+            opcode,
+            immediate,
+        }
+    }
+}
+
+impl Encoding for SPPlusMinusImmediateEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b1) << 7;
+        encoding |= ((self.immediate >> 2) & 0b1111111) as u16;
+        encoding
+    }
+}

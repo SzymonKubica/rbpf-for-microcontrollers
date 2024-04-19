@@ -93,33 +93,6 @@ impl JitCompiler {
         }
     }
 
-
-    /// Allows for pushing multiple registers onto the stack (can include LR)
-    fn emit_push_multiple(&self, mem: &mut JitMemory, register_list: &[u8]) {
-        let mut reg_list: u8 = 0;
-        for reg in register_list {
-            reg_list |= 1 << reg;
-        }
-        const PUSH_OPCODE: u8 = 0b010;
-        let m = if register_list.contains(&LR) { 1 } else { 0 };
-
-        let instr = ThumbInstruction::PushMultipleRegisters(PushPopEncoding::new(PUSH_OPCODE, m, reg_list));
-
-    }
-
-    /// Allows for popping multiple registers from the stack (can include PC)
-    fn emit_pop_multiple(&self, mem: &mut JitMemory, register_list: &[u8]) {
-        let mut reg_list: u8 = 0;
-        for reg in register_list {
-            reg_list |= 1 << reg;
-        }
-        const POP_OPCODE: u8 = 0b110;
-        let p = if register_list.contains(&PC) { 1 } else { 0 };
-
-        let instr = ThumbInstruction::PopMultipleRegisters(PushPopEncoding::new(POP_OPCODE, p, reg_list));
-        instr.emit(mem);
-    }
-
     // This is supposed to allow us to jump back to LR.
     fn emit_b(&mut self, mem: &mut JitMemory, reg: u8) {
         let template: u16 = 0b0100011100000000;
@@ -139,11 +112,10 @@ impl JitCompiler {
         update_data_ptr: bool,
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
-        self.emit_push_multiple(mem, &vec![R4, R5, R6, R7, LR]);
-
-        for reg in CALLEE_SAVED_REGISTERS {
-            //self.emit_push(mem, reg)
+        ThumbInstruction::PushMultipleRegisters {
+            registers: vec![R4, R5, R6, R7, LR],
         }
+        .emit(mem);
 
         // R7: mbuff
         // RSI: mbuff_len
@@ -192,7 +164,17 @@ impl JitCompiler {
         //self.emit_mov(mem, SP, map_register(10));
 
         // Allocate stack space
-        //self.emit_alu64_imm32(mem, 0x81, 5, SP, ebpf::STACK_SIZE as i32);
+        // Subtract eBPF stack size from STACK pointer. Given that our instruction
+        // allows for shifting the stack by at most 4*127 bytes at once, we need
+        // to do this twice to achieve the stack size of 512 used by eBPF.
+        ThumbInstruction::SubtractImmediateFromSP {
+            immediate_offset: ebpf::STACK_SIZE as u16 / 2
+        }
+        .emit(mem);
+        ThumbInstruction::SubtractImmediateFromSP {
+            immediate_offset: ebpf::STACK_SIZE as u16 / 2
+        }
+        .emit(mem);
 
         self.pc_locs = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
 
@@ -603,14 +585,24 @@ impl JitCompiler {
         }
 
         // Deallocate stack space
-        //self.emit_alu64_imm32(mem, 0x81, 0, SP, ebpf::STACK_SIZE as i32);
-
-        for reg in CALLEE_SAVED_REGISTERS.iter().rev() {
-            //self.emit_pop(mem, *reg)
+        // The add immediate to SP instruction allows for at most 4*127 bytes
+        // being shifted, so we need to do this twice to shift the stack by 512 bytes.
+        ThumbInstruction::AddImmediateToSP {
+            immediate_offset: ebpf::STACK_SIZE as u16 / 2
         }
+        .emit(mem);
+        ThumbInstruction::AddImmediateToSP {
+            immediate_offset: ebpf::STACK_SIZE as u16 / 2
+        }
+        .emit(mem);
 
         self.emit_mov_imm8(mem, 123, R0);
-        self.emit_pop_multiple(mem, &vec![R4, R5, R6, R7, PC]);
+
+        ThumbInstruction::PopMultipleRegisters {
+            registers: vec![R4, R5, R6, R7, PC],
+        }
+        .emit(mem);
+
         self.emit_b(mem, LR);
 
         Ok(())
