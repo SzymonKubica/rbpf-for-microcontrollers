@@ -1015,11 +1015,20 @@ impl JitCompiler {
 /// inside of RIOT, we take in an already intialized memory buffer then initialising
 /// the struct.
 pub struct JitMemory<'a> {
-    pub contents: &'a mut [u8],
-    pub offset: usize,
+    contents: &'a mut [u8],
+    offset: usize,
 }
 
 impl<'a> JitMemory<'a> {
+    /// It is very important that the `jit_memory_buff` that is passed in here
+    /// as an argument is aligned at the 4-byte boundary. This is because the
+    /// CPU expects that. One can achieve this by creating a wrapper struct like
+    /// this:
+    /// ```
+    /// #[repr(C, align(4))]
+    /// struct AlignedBuffer([u8; 6]);
+    /// ```
+    /// And then passing a reference to the contents of that struct to this function.
     pub fn new(
         prog: &[u8],
         jit_memory_buff: &'a mut [u8],
@@ -1039,8 +1048,15 @@ impl<'a> JitMemory<'a> {
         Ok(mem)
     }
 
-    pub fn get_prog(&self) -> unsafe fn() -> () {
-        unsafe { mem::transmute(self.contents.as_ptr()) }
+    /// Responsible for transmuting the pointer to the jit program memory buffer
+    /// so that it can be executed as a funtion. According to the ARM documentation,
+    /// the LSB bit of the instruction pointer needs to be set to indicate to the
+    /// CPU that it needs to be run in Thumb mode [see here](https://developer.arm.com/documentation/dui0471/m/interworking-arm-and-thumb/pointers-to-functions-in-thumb-state)
+    pub fn get_prog(&self) -> MachineCode {
+        let mut prog_ptr: u32 = self.contents.as_ptr() as u32;
+        // We need to set the LSB thumb bit.
+        prog_ptr = prog_ptr | 0x1;
+        unsafe { mem::transmute(prog_ptr as *mut u32) }
     }
 }
 
