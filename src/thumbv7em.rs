@@ -48,28 +48,28 @@ pub enum ThumbInstruction {
     Add8BitImmediate { rd: u8, imm8: u8 },
     Subtract8BitImmediate { rd: u8, imm8: u8 },
     // Data processing (operate mostly on registers)
-    BitwiseAND,
-    ExclusiveOR,
-    LogicalShiftLeft,
-    LogicalShiftRight,
-    ArithmeticShiftRight,
-    AddWithCarry,
-    SubtractWithCarry,
-    RotateRight,
-    SetFlagsOnBitwiseAND,
-    ReverseSubtractFrom0,
-    Compare,
-    CompareNegative,
-    LogicalOR,
-    MultiplyTwoRegisters,
-    BitClear,
-    BitwiseNOT,
+    BitwiseAND { rm: u8, rd: u8 },
+    ExclusiveOR { rm: u8, rd: u8 },
+    LogicalShiftLeft { rm: u8, rd: u8 },
+    LogicalShiftRight { rm: u8, rd: u8 },
+    ArithmeticShiftRight { rm: u8, rd: u8 },
+    AddWithCarry { rm: u8, rd: u8 },
+    SubtractWithCarry { rm: u8, rd: u8 },
+    RotateRight { rm: u8, rd: u8 },
+    SetFlagsOnBitwiseAND { rm: u8, rd: u8 },
+    ReverseSubtractFrom0 { rm: u8, rd: u8 },
+    Compare { rm: u8, rd: u8 },
+    CompareNegative { rm: u8, rd: u8 },
+    LogicalOR { rm: u8, rd: u8 },
+    MultiplyTwoRegisters { rm: u8, rd: u8 },
+    BitClear { rm: u8, rd: u8 },
+    BitwiseNOT { rm: u8, rd: u8 },
     // Special data instructions and branch and exchange
-    AddRegistersSpecial,
-    CompareRegistersSpecial,
-    MoveRegistersSpecial,
-    BranchAndExchange,
-    BranchWithLinkAndExchange,
+    AddRegistersSpecial { d: u8, rm: u8, rd: u8 },
+    CompareRegistersSpecial { n: u8, rm: u8, rd: u8 },
+    MoveRegistersSpecial { d: u8, rm: u8, rd: u8 },
+    BranchAndExchange { rm: u8 },
+    BranchWithLinkAndExchange { rm: u8 },
     // Load/store single data item
     StoreRegister,
     StoreRegisterHalfword,
@@ -88,7 +88,7 @@ pub enum ThumbInstruction {
     StoreRegisterSPRelativeImmediate,
     LoadRegisterSPRelativeImmediate,
     // Miscellaneous 16-bit instructions
-    ChangeProcessorStateCPSon,
+    ChangeProcessorState,
     AddImmediateToSP { imm: u16 },
     SubtractImmediateFromSP { imm: u16 },
     CompareAndBranchOnZero,
@@ -164,27 +164,92 @@ impl ThumbInstruction {
                 Immediate8OneRegisterEncoding::new(SUB_OPCODE, *imm8, *rd).encode()
             }
             // Data processing (operate mostly on registers)
-            ThumbInstruction::BitwiseAND => todo!(),
-            ThumbInstruction::ExclusiveOR => todo!(),
-            ThumbInstruction::LogicalShiftLeft => todo!(),
-            ThumbInstruction::LogicalShiftRight => todo!(),
-            ThumbInstruction::ArithmeticShiftRight => todo!(),
-            ThumbInstruction::AddWithCarry => todo!(),
-            ThumbInstruction::SubtractWithCarry => todo!(),
-            ThumbInstruction::RotateRight => todo!(),
-            ThumbInstruction::SetFlagsOnBitwiseAND => todo!(),
-            ThumbInstruction::ReverseSubtractFrom0 => todo!(),
-            ThumbInstruction::Compare => todo!(),
-            ThumbInstruction::CompareNegative => todo!(),
-            ThumbInstruction::LogicalOR => todo!(),
-            ThumbInstruction::MultiplyTwoRegisters => todo!(),
-            ThumbInstruction::BitClear => todo!(),
-            ThumbInstruction::BitwiseNOT => todo!(),
-            ThumbInstruction::AddRegistersSpecial => todo!(),
-            ThumbInstruction::CompareRegistersSpecial => todo!(),
-            ThumbInstruction::MoveRegistersSpecial => todo!(),
-            ThumbInstruction::BranchAndExchange => todo!(),
-            ThumbInstruction::BranchWithLinkAndExchange => todo!(),
+            ThumbInstruction::BitwiseAND { rm, rd } => {
+                const AND_OPCODE: u8 = 0b0000;
+                TwoRegistersEncoding::new(AND_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::ExclusiveOR { rm, rd } => {
+                const EOR_OPCODE: u8 = 0b0001;
+                TwoRegistersEncoding::new(EOR_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::LogicalShiftLeft { rm, rd } => {
+                const LSL_OPCODE: u8 = 0b0010;
+                TwoRegistersEncoding::new(LSL_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::LogicalShiftRight { rm, rd } => {
+                const LSR_OPCODE: u8 = 0b0011;
+                TwoRegistersEncoding::new(LSR_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::ArithmeticShiftRight { rm, rd } => {
+                const ASR_OPCODE: u8 = 0b0100;
+                TwoRegistersEncoding::new(ASR_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::AddWithCarry { rm, rd } => {
+                const ADC_OPCODE: u8 = 0b0101;
+                TwoRegistersEncoding::new(ADC_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::SubtractWithCarry { rm, rd } => {
+                const SBC_OPCODE: u8 = 0b0110;
+                TwoRegistersEncoding::new(SBC_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::RotateRight { rm, rd } => {
+                const ROR_OPCODE: u8 = 0b0111;
+                TwoRegistersEncoding::new(ROR_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::SetFlagsOnBitwiseAND { rm, rd } => {
+                const TST_OPCODE: u8 = 0b1000;
+                TwoRegistersEncoding::new(TST_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::ReverseSubtractFrom0 { rm, rd } => {
+                const RSB_OPCODE: u8 = 0b1001;
+                TwoRegistersEncoding::new(RSB_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::Compare { rm, rd } => {
+                const CMP_OPCODE: u8 = 0b1010;
+                TwoRegistersEncoding::new(CMP_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::CompareNegative { rm, rd } => {
+                const CMN_OPCODE: u8 = 0b1011;
+                TwoRegistersEncoding::new(CMN_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::LogicalOR { rm, rd } => {
+                const ORR_OPCODE: u8 = 0b1100;
+                TwoRegistersEncoding::new(ORR_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::MultiplyTwoRegisters { rm, rd } => {
+                const MUL_OPCODE: u8 = 0b1101;
+                TwoRegistersEncoding::new(MUL_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::BitClear { rm, rd } => {
+                const BIC_OPCODE: u8 = 0b1110;
+                TwoRegistersEncoding::new(BIC_OPCODE, *rm, *rd).encode()
+            }
+            ThumbInstruction::BitwiseNOT { rm, rd } => {
+                const MVN_OPCODE: u8 = 0b1111;
+                TwoRegistersEncoding::new(MVN_OPCODE, *rm, *rd).encode()
+            }
+            // Special data instructions and branch and exchange
+            ThumbInstruction::AddRegistersSpecial { d, rm, rd } => {
+                const ADD_OPCODE: u8 = 0b00;
+                TwoRegistersSpecialEncoding::new(ADD_OPCODE, *d, *rm, *rd).encode()
+            }
+            ThumbInstruction::CompareRegistersSpecial { n, rm, rd } => {
+                const CMP_OPCODE: u8 = 0b01;
+                TwoRegistersSpecialEncoding::new(CMP_OPCODE, *n, *rm, *rd).encode()
+            }
+            ThumbInstruction::MoveRegistersSpecial { d, rm, rd } => {
+                const MOV_OPCODE: u8 = 0b10;
+                TwoRegistersSpecialEncoding::new(MOV_OPCODE, *d, *rm, *rd).encode()
+            }
+            ThumbInstruction::BranchAndExchange { rm } => {
+                const BX_OPCODE: u8 = 0b110;
+                SpecialBranchEncoding::new(BX_OPCODE, *rm).encode()
+            }
+            ThumbInstruction::BranchWithLinkAndExchange { rm } => {
+                const BLX_OPCODE: u8 = 0b111;
+                SpecialBranchEncoding::new(BLX_OPCODE, *rm).encode()
+            }
+            // Load/store single data item
             ThumbInstruction::StoreRegister => todo!(),
             ThumbInstruction::StoreRegisterHalfword => todo!(),
             ThumbInstruction::StoreRegisterByte => todo!(),
@@ -201,7 +266,8 @@ impl ThumbInstruction {
             ThumbInstruction::LoadRegisterHalfwordImmediate => todo!(),
             ThumbInstruction::StoreRegisterSPRelativeImmediate => todo!(),
             ThumbInstruction::LoadRegisterSPRelativeImmediate => todo!(),
-            ThumbInstruction::ChangeProcessorStateCPSon => todo!(),
+            ThumbInstruction::ChangeProcessorState => todo!(),
+            // Miscellaneous 16-bit instructions
             ThumbInstruction::AddImmediateToSP {
                 imm: immediate_offset,
             } => {
@@ -506,6 +572,94 @@ impl Encoding for ThreeRegistersEncoding {
         encoding |= (self.rm as u16 & 0b111) << 6;
         encoding |= (self.rn as u16 & 0b111) << 3;
         encoding |= self.rd as u16 & 0b111;
+        encoding
+    }
+}
+
+pub struct TwoRegistersEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    rm: u8,
+    // Destination register
+    rd: u8,
+}
+
+impl TwoRegistersEncoding {
+    pub fn new(opcode: u8, rm: u8, rd: u8) -> TwoRegistersEncoding {
+        TwoRegistersEncoding {
+            class_opcode: DATA_PROCESSING,
+            opcode,
+            rm,
+            rd,
+        }
+    }
+}
+
+impl Encoding for TwoRegistersEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b1111) << 6;
+        encoding |= (self.rm as u16 & 0b111) << 3;
+        encoding |= self.rd as u16 & 0b111;
+        encoding
+    }
+}
+
+pub struct TwoRegistersSpecialEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    dn_or_n_bit: u8,
+    rm: u8,
+    rd: u8,
+}
+
+impl TwoRegistersSpecialEncoding {
+    pub fn new(opcode: u8, dn_or_n_bit: u8, rm: u8, rd: u8) -> TwoRegistersSpecialEncoding {
+        TwoRegistersSpecialEncoding {
+            class_opcode: SPECIAL_DATA_INSTRUCTIONS,
+            opcode,
+            dn_or_n_bit,
+            rm,
+            rd,
+        }
+    }
+}
+
+impl Encoding for TwoRegistersSpecialEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b11) << 8;
+        encoding |= (self.dn_or_n_bit as u16 & 0b1) << 7;
+        encoding |= (self.rm as u16 & 0b111) << 3;
+        encoding |= self.rd as u16 & 0b111;
+        encoding
+    }
+}
+
+pub struct SpecialBranchEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    rm: u8,
+}
+
+impl SpecialBranchEncoding {
+    pub fn new(opcode: u8, rm: u8) -> SpecialBranchEncoding {
+        SpecialBranchEncoding {
+            class_opcode: SPECIAL_DATA_INSTRUCTIONS,
+            opcode,
+            rm,
+        }
+    }
+}
+
+impl Encoding for SpecialBranchEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b111) << 7;
+        encoding |= (self.rm as u16 & 0b111) << 3;
         encoding
     }
 }
