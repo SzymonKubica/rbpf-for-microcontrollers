@@ -36,17 +36,17 @@ pub const INSTRUCTION_SIZE: u16 = 16;
 /// registers.
 pub enum ThumbInstruction {
     // Shift (immediate), add, subtract, move, and compare
-    LogicalShiftLeftImmediate,
-    LogicalShiftRightImmediate,
-    ArithmeticShiftRightASRImmediate,
-    Add,
-    Subtract,
-    Add3BitImmediate,
-    Subtract3BitImmediate,
-    MoveImmediate,
-    CompareImmediate,
-    Add8BitImmediate,
-    Subtract8BitImmediate,
+    LogicalShiftLeftImmediate { imm5: u8, rm: u8, rd: u8 },
+    LogicalShiftRightImmediate { imm5: u8, rm: u8, rd: u8 },
+    ArithmeticShiftRightImmediate { imm5: u8, rm: u8, rd: u8 },
+    Add { rm: u8, rn: u8, rd: u8 },
+    Subtract { rm: u8, rn: u8, rd: u8 },
+    Add3BitImmediate { imm3: u8, rn: u8, rd: u8 },
+    Subtract3BitImmediate { imm3: u8, rn: u8, rd: u8 },
+    MoveImmediate { rd: u8, imm8: u8 },
+    CompareImmediate { rd: u8, imm8: u8 },
+    Add8BitImmediate { rd: u8, imm8: u8 },
+    Subtract8BitImmediate { rd: u8, imm8: u8 },
     // Data processing (operate mostly on registers)
     BitwiseAND,
     ExclusiveOR,
@@ -118,17 +118,52 @@ pub enum ThumbInstruction {
 impl ThumbInstruction {
     pub fn emit_into(&self, mem: &mut JitMemory) {
         let encoding = match self {
-            ThumbInstruction::LogicalShiftLeftImmediate => todo!(),
-            ThumbInstruction::LogicalShiftRightImmediate => todo!(),
-            ThumbInstruction::ArithmeticShiftRightASRImmediate => todo!(),
-            ThumbInstruction::Add => todo!(),
-            ThumbInstruction::Subtract => todo!(),
-            ThumbInstruction::Add3BitImmediate => todo!(),
-            ThumbInstruction::Subtract3BitImmediate => todo!(),
-            ThumbInstruction::MoveImmediate => todo!(),
-            ThumbInstruction::CompareImmediate => todo!(),
-            ThumbInstruction::Add8BitImmediate => todo!(),
-            ThumbInstruction::Subtract8BitImmediate => todo!(),
+            // Shift (immediate), add, subtract, move, and compare
+            ThumbInstruction::LogicalShiftLeftImmediate { imm5, rm, rd } => {
+                const LSL_OPCODE: u8 = 0b00;
+                Immediate5TwoRegistersEncoding::new(LSL_OPCODE, *imm5, *rm, *rd).encode()
+            }
+            ThumbInstruction::LogicalShiftRightImmediate { imm5, rm, rd } => {
+                const LSR_OPCODE: u8 = 0b01;
+                Immediate5TwoRegistersEncoding::new(LSR_OPCODE, *imm5, *rm, *rd).encode()
+            }
+            ThumbInstruction::ArithmeticShiftRightImmediate { imm5, rm, rd } => {
+                const ASR_OPCODE: u8 = 0b10;
+                Immediate5TwoRegistersEncoding::new(ASR_OPCODE, *imm5, *rm, *rd).encode()
+            }
+            ThumbInstruction::Add { rm, rn, rd } => {
+                const ADD_OPCODE: u8 = 0b01100;
+                ThreeRegistersEncoding::new(ADD_OPCODE, *rm, *rn, *rd).encode()
+            }
+            ThumbInstruction::Subtract { rm, rn, rd } => {
+                const SUB_OPCODE: u8 = 0b01101;
+                ThreeRegistersEncoding::new(SUB_OPCODE, *rm, *rn, *rd).encode()
+            }
+            ThumbInstruction::Add3BitImmediate { imm3, rn, rd } => {
+                const ADD_OPCODE: u8 = 0b01110;
+                Immediate3TwoRegistersEncoding::new(ADD_OPCODE, *imm3, *rn, *rd).encode()
+            }
+            ThumbInstruction::Subtract3BitImmediate { imm3, rn, rd } => {
+                const SUB_OPCODE: u8 = 0b01111;
+                Immediate3TwoRegistersEncoding::new(SUB_OPCODE, *imm3, *rn, *rd).encode()
+            }
+            ThumbInstruction::MoveImmediate { rd, imm8 } => {
+                const MOV_OPCODE: u8 = 0b0100;
+                Immediate8OneRegisterEncoding::new(MOV_OPCODE, *imm8, *rd).encode()
+            }
+            ThumbInstruction::CompareImmediate { rd, imm8 } => {
+                const CPM_OPCODE: u8 = 0b0101;
+                Immediate8OneRegisterEncoding::new(CPM_OPCODE, *imm8, *rd).encode()
+            }
+            ThumbInstruction::Add8BitImmediate { rd, imm8 } => {
+                const SUB_OPCODE: u8 = 0b110;
+                Immediate8OneRegisterEncoding::new(SUB_OPCODE, *imm8, *rd).encode()
+            }
+            ThumbInstruction::Subtract8BitImmediate { rd, imm8 } => {
+                const SUB_OPCODE: u8 = 0b111;
+                Immediate8OneRegisterEncoding::new(SUB_OPCODE, *imm8, *rd).encode()
+            }
+            // Data processing (operate mostly on registers)
             ThumbInstruction::BitwiseAND => todo!(),
             ThumbInstruction::ExclusiveOR => todo!(),
             ThumbInstruction::LogicalShiftLeft => todo!(),
@@ -167,12 +202,16 @@ impl ThumbInstruction {
             ThumbInstruction::StoreRegisterSPRelativeImmediate => todo!(),
             ThumbInstruction::LoadRegisterSPRelativeImmediate => todo!(),
             ThumbInstruction::ChangeProcessorStateCPSon => todo!(),
-            ThumbInstruction::AddImmediateToSP { imm: immediate_offset } => {
+            ThumbInstruction::AddImmediateToSP {
+                imm: immediate_offset,
+            } => {
                 const ADD_OPCODE: u8 = 0b1;
                 SPPlusMinusImmediateEncoding::new(ADD_OPCODE, *immediate_offset).encode()
             }
 
-            ThumbInstruction::SubtractImmediateFromSP { imm: immediate_offset } => {
+            ThumbInstruction::SubtractImmediateFromSP {
+                imm: immediate_offset,
+            } => {
                 const SUBTRACT_OPCODE: u8 = 0b0;
                 SPPlusMinusImmediateEncoding::new(SUBTRACT_OPCODE, *immediate_offset).encode()
             }
@@ -336,6 +375,137 @@ impl Encoding for SPPlusMinusImmediateEncoding {
         self.class_opcode.apply(&mut encoding);
         encoding |= (self.opcode as u16 & 0b1) << 7;
         encoding |= ((self.immediate >> 2) & 0b1111111) as u16;
+        encoding
+    }
+}
+
+pub struct Immediate5TwoRegistersEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    imm5: u8,
+    rm: u8,
+    // Destination register
+    rd: u8,
+}
+
+impl Immediate3TwoRegistersEncoding {
+    pub fn new(opcode: u8, imm3: u8, rn: u8, rd: u8) -> Immediate3TwoRegistersEncoding {
+        Immediate3TwoRegistersEncoding {
+            class_opcode: BASIC,
+            opcode,
+            imm3,
+            rn,
+            rd,
+        }
+    }
+}
+
+impl Encoding for Immediate3TwoRegistersEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b11111) << 11;
+        encoding |= (self.imm3 as u16 & 0b111) << 6;
+        encoding |= (self.rn as u16 & 0b111) << 3;
+        encoding |= self.rd as u16 & 0b111;
+        encoding
+    }
+}
+
+pub struct Immediate3TwoRegistersEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    // 3-bit immediate operand
+    imm3: u8,
+    rn: u8,
+    // Destination register
+    rd: u8,
+}
+
+impl Immediate5TwoRegistersEncoding {
+    pub fn new(opcode: u8, imm5: u8, rm: u8, rd: u8) -> Immediate5TwoRegistersEncoding {
+        Immediate5TwoRegistersEncoding {
+            class_opcode: BASIC,
+            opcode,
+            imm5,
+            rm,
+            rd,
+        }
+    }
+}
+
+impl Encoding for Immediate5TwoRegistersEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b11) << 11;
+        encoding |= (self.imm5 as u16 & 0b11111) << 6;
+        encoding |= (self.rm as u16 & 0b111) << 3;
+        encoding |= self.rd as u16 & 0b111;
+        encoding
+    }
+}
+
+pub struct Immediate8OneRegisterEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    // 8-bit immediate operand
+    imm8: u8,
+    // Destination register
+    rd: u8,
+}
+
+impl Immediate8OneRegisterEncoding {
+    pub fn new(opcode: u8, imm8: u8, rd: u8) -> Immediate8OneRegisterEncoding {
+        Immediate8OneRegisterEncoding {
+            class_opcode: BASIC,
+            opcode,
+            imm8,
+            rd,
+        }
+    }
+}
+
+impl Encoding for Immediate8OneRegisterEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b111) << 11;
+        encoding |= (self.rd as u16 & 0b111) << 8;
+        encoding |= self.imm8 as u16 & 0b11111111;
+        encoding
+    }
+}
+
+pub struct ThreeRegistersEncoding {
+    class_opcode: InstructionClassOpcode,
+    opcode: u8,
+    rm: u8,
+    rn: u8,
+    // Destination register
+    rd: u8,
+}
+
+impl ThreeRegistersEncoding {
+    pub fn new(opcode: u8, rm: u8, rn: u8, rd: u8) -> ThreeRegistersEncoding {
+        ThreeRegistersEncoding {
+            class_opcode: BASIC,
+            opcode,
+            rm,
+            rn,
+            rd,
+        }
+    }
+}
+
+impl Encoding for ThreeRegistersEncoding {
+    fn encode(&self) -> u16 {
+        let mut encoding = 0;
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.opcode as u16 & 0b11111) << 9;
+        encoding |= (self.rm as u16 & 0b111) << 6;
+        encoding |= (self.rn as u16 & 0b111) << 3;
+        encoding |= self.rd as u16 & 0b111;
         encoding
     }
 }

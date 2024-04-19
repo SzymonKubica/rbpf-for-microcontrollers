@@ -19,6 +19,13 @@ use ebpf;
 use thumbv7em::*;
 
 /// The jit-compiled code can then be called as a function
+/// the arguments to this function are as follows:
+/// - pointer to the mbuff
+/// - mbuff length
+/// - pointer to mem
+/// - mem length
+/// The last two arguments indicate to the JIT at which offset in the mbuff mem_ptr and mem_ptr + mem.len()
+/// should be stored; this is what happens with struct EbpfVmFixedMbuff.
 type MachineCode = unsafe fn(*mut u8, usize, *mut u8, usize, usize, usize) -> u64;
 
 const PAGE_SIZE: usize = 4096;
@@ -44,12 +51,13 @@ const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
     R1, // 1  arg 1
     R2, // 2  arg 2
     R3, // 3  arg 3
-    R4, // 4  arg 4
-    R5, // 5  arg 5
+    R4, // 4  callee-saved
+    R5, // 5  callee-saved
     R6, // 6  callee-saved
     R7, // 7  callee-saved
-    R8, // 8  callee-saved
-    R9, // 9  callee-saved
+    R8, // 8  cannot callee-save 8 and 9 because the 16 bit thumb stack push instruction only works
+        // for R4-R7 and LR
+    R9, // 9
     SP, // 10 stack pointer
         // R10 and R11 are used to compute store a constant pointer to mem and to compute offset for
         // LD_ABS_* and LD_IND_* operations, so they are not mapped to any eBPF register.
