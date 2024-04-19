@@ -10,10 +10,12 @@
 use alloc::string::ToString;
 use core::mem;
 use core::ops::{Index, IndexMut};
+use log::debug;
 use stdlib::collections::BTreeMap as HashMap;
 use stdlib::collections::Vec;
-use stdlib::{Error, ErrorKind};
+use stdlib::{Error, ErrorKind, String};
 
+use thumbv7em::*;
 use ebpf;
 
 /// The jit-compiled code can then be called as a function
@@ -36,23 +38,6 @@ enum OperandSize {
     S64 = 64,
 }
 
-// Registers
-const R0: u8 = 0;
-const R1: u8 = 1;
-const R2: u8 = 2;
-const R3: u8 = 3;
-const R4: u8 = 4;
-const R5: u8 = 5;
-const R6: u8 = 6;
-const R7: u8 = 7;
-const R8: u8 = 8;
-const R9: u8 = 9;
-const R10: u8 = 10;
-const R11: u8 = 11;
-const R12: u8 = 12;
-const SP: u8 = 13;
-const LR: u8 = 14;
-const PC: u8 = 15;
 
 const REGISTER_MAP_SIZE: usize = 11;
 const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
@@ -161,14 +146,42 @@ impl JitCompiler {
     }
 
     fn emit_push(&self, mem: &mut JitMemory, r: u8) {
-        let template: u64 = 0b11111000010011010000110100000100;
-        self.emit8(mem, template | (r as u64 & 0b1111) as u64);
+        let template: u32 = 0b11111000010011010000110100000100;
+        self.emit4(mem, template | (r as u32 & 0b1111) as u32);
+    }
+
+    /// Allows for pushing multiple registers onto the stack (can include LR)
+    fn emit_push_multiple(&self, mem: &mut JitMemory, register_list: &[u8]) {
+        let mut template: u16 = 0b1011010 << 9;
+        for reg in register_list {
+            if *reg == LR {
+                template |= 1 << 8;
+            } else {
+                template |= 1 << reg;
+            }
+        }
+
+        self.emit2(mem, template);
+    }
+
+    /// Allows for popping multiple registers from the stack (can include PC)
+    fn emit_pop_multiple(&self, mem: &mut JitMemory, register_list: &[u8]) {
+        let mut template: u16 = 0b1011110 << 9;
+        for reg in register_list {
+            if *reg == PC {
+                template |= 1 << 8;
+            } else {
+                template |= 1 << reg;
+            }
+        }
+
+        self.emit2(mem, template);
     }
 
     fn emit_pop(&self, mem: &mut JitMemory, r: u8) {
         self.emit_basic_rex(mem, 0, 0, r);
-        let template: u64 = 0b11111000010111010000101100000100;
-        self.emit8(mem, template | (r as u64 & 0b1111) as u64);
+        let template: u32 = 0b11111000010111010000101100000100;
+        self.emit4(mem, template | (r as u32 & 0b1111) as u32);
     }
 
     fn emit_modrm_and_displacement(&self, mem: &mut JitMemory, r: u8, m: u8, d: i32) {
@@ -236,7 +249,7 @@ impl JitCompiler {
     }
 
     fn emit_mov_imm16_long(&self, mem: &mut JitMemory, imm: u16, dst: u8) {
-        let template: u32 = 0b11110010010000000 << 14;
+        let template: u32 = 0b11110010010000000 << 15;
         let i = (imm & (1 << 11)) as u32;
         let imm4 = (imm & (0b1111 << 12)) as u32;
         let imm3 = (imm & (0b111 << 8)) as u32;
@@ -501,13 +514,11 @@ impl JitCompiler {
         update_data_ptr: bool,
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
-        /*
-        self.emit_push(mem, R5);
-        self.emit_push(mem, R3);
-        self.emit_push(mem, SP);
-        self.emit_push(mem, LR);
-        self.emit_push(mem, PC);
-        */
+        self.emit_push_multiple(mem, &vec![R4, R5, R6, R7, LR]);
+
+        for reg in CALLEE_SAVED_REGISTERS {
+            //self.emit_push(mem, reg)
+        }
 
         // R7: mbuff
         // RSI: mbuff_len
@@ -969,16 +980,12 @@ impl JitCompiler {
         // Deallocate stack space
         //self.emit_alu64_imm32(mem, 0x81, 0, SP, ebpf::STACK_SIZE as i32);
 
-        /*
-        self.emit_pop(mem, PC);
-        self.emit_pop(mem, LR);
-        self.emit_pop(mem, SP);
-        self.emit_pop(mem, R3);
-        self.emit_pop(mem, R5);
-        */
+        for reg in CALLEE_SAVED_REGISTERS.iter().rev() {
+            //self.emit_pop(mem, *reg)
+        }
 
-        // here we need to emit bx lr
         self.emit_mov_imm8(mem, 123, R0);
+        self.emit_pop_multiple(mem, &vec![R4, R5, R6, R7, PC]);
         self.emit_b(mem, LR);
 
         Ok(())
@@ -1054,6 +1061,14 @@ impl<'a> JitMemory<'a> {
     /// CPU that it needs to be run in Thumb mode [see here](https://developer.arm.com/documentation/dui0471/m/interworking-arm-and-thumb/pointers-to-functions-in-thumb-state)
     pub fn get_prog(&self) -> MachineCode {
         let mut prog_ptr: u32 = self.contents.as_ptr() as u32;
+        let mut prog_str: String = String::new();
+        for (i, b) in self.contents.iter().take(self.offset).enumerate() {
+            prog_str.push_str(&format!("{:02x}", *b));
+            if i % 4 == 3 {
+                prog_str.push_str("\n");
+            }
+        }
+        debug!("JIT program:\n{}", prog_str);
         // We need to set the LSB thumb bit.
         prog_ptr = prog_ptr | 0x1;
         unsafe { mem::transmute(prog_ptr as *mut u32) }

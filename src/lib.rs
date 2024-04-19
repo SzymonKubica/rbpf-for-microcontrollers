@@ -90,6 +90,7 @@ mod interpreter_femtocontainers_header;
 mod interpreter_raw_elf_file;
 mod interpreter_common;
 mod jit_thumbv7em;
+mod thumbv7em;
 
 pub use verifier::check_helpers;
 #[cfg(jit)]
