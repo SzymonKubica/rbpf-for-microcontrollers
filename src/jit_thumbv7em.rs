@@ -44,19 +44,22 @@ enum OperandSize {
 }
 
 const REGISTER_MAP_SIZE: usize = 11;
+// Mapps from the the ARMv7-eM registers to the eBPF registers
+// Note that the annotations on the right describe the function of the register
+// in the eBPF ISA, which specifies e.g. that SP needs to be the register 10
+// whereas in ARMv7-eM it is R13.
 const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
     R0, // 0  return value
     R1, // 1  arg 1
     R2, // 2  arg 2
     R3, // 3  arg 3
-    R4, // 4  callee-saved
-    R5, // 5  callee-saved
+    R4, // 4  arg 4
+    R5, // 5  arg 5
     R6, // 6  callee-saved
     R7, // 7  callee-saved
-    R8, // 8  cannot callee-save 8 and 9 because the 16 bit thumb stack push instruction only works
-    // for R4-R7 and LR
-    R9, // 9
-    SP, // 10 stack pointer
+    R8, // 8  callee-saved
+    R9, // 9 callee-saved
+    SP, // 10 stack pointer (eBPF specification requires that SP is in register 10)
         // R10 and R11 are used to compute store a constant pointer to mem and to compute offset for
         // LD_ABS_* and LD_IND_* operations, so they are not mapped to any eBPF register.
 ];
@@ -118,7 +121,7 @@ impl JitCompiler {
         mem: &mut JitMemory,
         prog: &[u8],
         use_mbuff: bool,
-        update_data_ptr: bool,
+        update_data_ptr: bool, // This isn't used by my version of the jit.
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
         Self::save_callee_save_registers(mem);
@@ -134,41 +137,30 @@ impl JitCompiler {
         //self.emit_mov(mem, R2, R10);
         I::MoveRegistersSpecial { rm: R2, rd: R10 }.emit_into(mem);
 
-        /*
-        match (use_mbuff, update_data_ptr) {
-            (false, _) => {
-                // We do not use any mbuff. Move mem pointer into register 1.
-                if map_register(1) != R2 {
-                    self.emit_mov(mem, R2, map_register(1));
-                }
+        // We need to adjust pointers to the packet buffer and mem according
+        // to the eBPF specification
+        if use_mbuff {
+            // If we use the mbuff we need to bring the pointer to it into R1
+            // The mbuff pointer is the first argument into the jitted function
+            // so it will end up in R0
+            let rd = map_register(1); // eBPF R1
+            if rd != R0 {
+                I::MoveRegistersSpecial { rm: R0, rd }.emit_into(mem);
             }
-            (true, false) => {
-                // We use a mbuff already pointing to mem and mem_end: move it to register 1.
-                if map_register(1) != R7 {
-                    self.emit_mov(mem, R7, map_register(1));
-                }
-            }
-            (true, true) => {
-                // We have a fixed (simulated) mbuff: update mem and mem_end offset values in it.
-                // Store mem at mbuff + mem_offset. Trash R8.
-                self.emit_alu64(mem, 0x01, R7, R8); // add mbuff to mem_offset in R8
-                self.emit_store(mem, OperandSize::S64, R2, R8, 0); // set mem at mbuff + mem_offset
-                                                                   // Store mem_end at mbuff + mem_end_offset. Trash R9.
-                self.emit_load(mem, OperandSize::S64, R2, R8, 0); // load mem into R8
-                self.emit_alu64(mem, 0x01, R1, R8); // add mem_len to mem (= mem_end)
-                self.emit_alu64(mem, 0x01, R7, R9); // add mbuff to mem_end_offset
-                self.emit_store(mem, OperandSize::S64, R8, R9, 0); // store mem_end
-
-                // Move rdi into register 1
-                if map_register(1) != R7 {
-                    self.emit_mov(mem, R7, map_register(1));
-                }
+        } else {
+            // We do not use any mbuff. Move mem pointer into register 1.
+            let rd = map_register(1); // eBPF R1
+            if rd != R2 {
+                I::MoveRegistersSpecial { rm: R2, rd }.emit_into(mem);
             }
         }
-        */
 
         // Copy stack pointer to R10
-        //self.emit_mov(mem, SP, map_register(10));
+        I::MoveRegistersSpecial {
+            rm: SP,
+            rd: map_register(10),
+        }
+        .emit_into(mem);
 
         // Allocate stack space
         // Subtract eBPF stack size from STACK pointer. Given that our instruction
@@ -180,7 +172,6 @@ impl JitCompiler {
 
         self.pc_locs = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
 
-        /*
         let mut insn_ptr: usize = 0;
         while insn_ptr * ebpf::INSN_SIZE < prog.len() {
             let insn = ebpf::get_insn(prog, insn_ptr);
@@ -190,6 +181,8 @@ impl JitCompiler {
             let dst = map_register(insn.dst);
             let src = map_register(insn.src);
             let target_pc = insn_ptr as isize + insn.off as isize + 1;
+
+            debug!("JIT: insn {:?}", insn);
 
             match insn.opc {
                 // BPF_LD class
@@ -237,7 +230,20 @@ impl JitCompiler {
                 // BPF_LDX class
                 ebpf::LD_B_REG => todo!(), //self.emit_load(mem, OperandSize::S8, src, dst, insn.off as i32),
                 ebpf::LD_H_REG => todo!(), //self.emit_load(mem, OperandSize::S16, src, dst, insn.off as i32),
-                ebpf::LD_W_REG => todo!(), //self.emit_load(mem, OperandSize::S32, src, dst, insn.off as i32),
+                ebpf::LD_W_REG => {
+                    if insn.off >> 5 > 0 {
+                        Err(Error::new(
+                            ErrorKind::Other,
+                            format!(
+                                "[JIT] Instruction LD_W_REG with immediate offset {:#x} which does not fit into 8 bits.",
+                                insn.off
+                            ),
+                        ))?;
+                    }
+
+                    I::LoadRegisterImmediate { imm5: insn.off as u8, rn: dst, rt: src }.emit_into(mem)
+                }
+                //self.emit_load(mem, OperandSize::S32, src, dst, insn.off as i32),
                 ebpf::LD_DW_REG => todo!(), //self.emit_load(mem, OperandSize::S64, src, dst, insn.off as i32),
 
                 // BPF_ST class
@@ -261,7 +267,20 @@ impl JitCompiler {
                 // BPF_STX class
                 ebpf::ST_B_REG => todo!(), //self.emit_store(mem, OperandSize::S8, src, dst, insn.off as i32),
                 ebpf::ST_H_REG => todo!(), //self.emit_store(mem, OperandSize::S16, src, dst, insn.off as i32),
-                ebpf::ST_W_REG => todo!(), //self.emit_store(mem, OperandSize::S32, src, dst, insn.off as i32),
+                ebpf::ST_W_REG => {
+                    if insn.off >> 5 > 0 {
+                        Err(Error::new(
+                            ErrorKind::Other,
+                            format!(
+                                "[JIT] Instruction ST_W_REG with immediate offset {:#x} which does not fit into 8 bits.",
+                                insn.off
+                            ),
+                        ))?;
+                    }
+
+                    I::StoreRegisterImmediate { imm5: insn.off as u8, rn: dst, rt: src }.emit_into(mem)
+                }
+                //self.emit_store(mem, OperandSize::S32, src, dst, insn.off as i32),
                 ebpf::ST_DW_REG => todo!(),
                 /*{
                     self.emit_store(mem, OperandSize::S64, src, dst, insn.off as i32)
@@ -302,7 +321,22 @@ impl JitCompiler {
                 ebpf::NEG32 => todo!(), //self.emit_alu32(mem, 0xf7, 3, dst),
                 ebpf::XOR32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 6, dst, insn.imm),
                 ebpf::XOR32_REG => todo!(), //self.emit_alu32(mem, 0x31, src, dst),
-                ebpf::MOV32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0xc7, 0, dst, insn.imm),
+                ebpf::MOV32_IMM => {
+                    // If the immediate doesn't fit into 8bits, we cannot translate this
+                    // instruction
+                    if insn.imm >> 8 > 0 {
+                    Err(Error::new(
+                        ErrorKind::Other,
+                        format!(
+                            "[JIT] Instruction MOV32_IMM with immediate {:#x} which does not fit into 8 bits.",
+                            insn.imm
+                        ),
+                    ))?;
+
+                    }
+                    I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)
+                }
+                //self.emit_alu32_imm32(mem, 0xc7, 0, dst, insn.imm),
                 ebpf::MOV32_REG => todo!(), //self.emit_mov(mem, src, dst),
                 ebpf::ARSH32_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
                 ebpf::ARSH32_REG => todo!(),
@@ -335,7 +369,19 @@ impl JitCompiler {
                 }*/
 
                 // BPF_ALU64 class
-                ebpf::ADD64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 0, dst, insn.imm),
+                ebpf::ADD64_IMM => {
+                    if insn.imm >> 8 > 0 {
+                        Err(Error::new(
+                            ErrorKind::Other,
+                            format!(
+                                "[JIT] Instruction ADD64_IMM with immediate {:#x} which does not fit into 8 bits.",
+                                insn.imm
+                            ),
+                        ))?;
+                    }
+
+                    I::Add8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)
+                }
                 ebpf::ADD64_REG => todo!(), //self.emit_alu64(mem, 0x01, src, dst),
                 ebpf::SUB64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 5, dst, insn.imm),
                 ebpf::SUB64_REG => todo!(), //self.emit_alu64(mem, 0x29, src, dst),
@@ -367,7 +413,21 @@ impl JitCompiler {
                 ebpf::NEG64 => todo!(), //self.emit_alu64(mem, 0xf7, 3, dst),
                 ebpf::XOR64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 6, dst, insn.imm),
                 ebpf::XOR64_REG => todo!(), //self.emit_alu64(mem, 0x31, src, dst),
-                ebpf::MOV64_IMM => todo!(), //self.emit_load_imm(mem, dst, insn.imm as i64),
+                ebpf::MOV64_IMM => {
+                    // If the immediate doesn't fit into 8bits, we cannot translate this
+                    // instruction
+                    if insn.imm >> 8 > 0 {
+                    Err(Error::new(
+                        ErrorKind::Other,
+                        format!(
+                            "[JIT] Instruction MOV32_IMM with immediate {:#x} which does not fit into 8 bits.",
+                            insn.imm
+                        ),
+                    ))?;
+
+                    }
+                    I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)
+                }
                 ebpf::MOV64_REG => todo!(), //self.emit_mov(mem, src, dst),
                 ebpf::ARSH64_IMM => todo!(), //self.emit_alu64_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
                 ebpf::ARSH64_REG => todo!(),
@@ -641,7 +701,6 @@ impl JitCompiler {
 
             insn_ptr += 1;
         }
-        */
 
         // Epilogue
         //self.set_anchor(mem, TARGET_PC_EXIT);
@@ -661,7 +720,7 @@ impl JitCompiler {
         //I::MoveImmediate { rd: R0, imm8: 123 }.emit_into(mem);
 
         // Here we test if we can return back the third argument
-        I::MoveRegistersSpecial { rm: R10, rd: R0 }.emit_into(mem);
+        //I::MoveRegistersSpecial { rm: R10, rd: R0 }.emit_into(mem);
 
         Self::restore_callee_save_registers(mem);
 
