@@ -262,27 +262,7 @@ impl JitCompiler {
                 ebpf::ST_B_REG => todo!(), //self.emit_store(mem, OperandSize::S8, src, dst, insn.off as i32),
                 ebpf::ST_H_REG => todo!(), //self.emit_store(mem, OperandSize::S16, src, dst, insn.off as i32),
                 ebpf::ST_W_REG => {
-
-                    // quick hack for negative offsets
-                    let off = if insn.off < 0 {
-                        (-1 *insn.off) as u8
-                    } else {
-                        insn.off as u8
-                    };
-
-                    // For now we don't have any load/store instruction which would allow
-                    // us for loading/storing values into registers higher than 7.
-                    // Because of this we handle the special case for SP and else
-                    // we return an error.
-                    if dst == SP {
-                        Self::verify_offset_size(insn.off, 8)?;
-                        I::StoreRegisterSPRelativeImmediate { imm8: off as u8, rt: src }.emit_into(mem)?;
-                    } else {
-                        Self::verify_offset_size(insn.off, 5)?;
-                        Self::verify_register_low(dst)?;
-                        Self::verify_register_low(src)?;
-                        I::StoreRegisterImmediate { imm5: off as u8, rn: dst, rt: src }.emit_into(mem)?;
-                    }
+                    I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?
                 }
                 //self.emit_store(mem, OperandSize::S32, src, dst, insn.off as i32),
                 ebpf::ST_DW_REG => todo!(),
@@ -767,21 +747,51 @@ impl JitCompiler {
         I::MoveRegistersSpecial { rm: R11, rd: R6 }.emit_into(mem)?;
 
         I::SubtractImmediateFromSP { imm: 12 }.emit_into(mem)?;
-        let mut imm8 = 0;
-        I::StoreRegisterSPRelativeImmediate { imm8, rt: R4 }.emit_into(mem)?;
-        imm8 += 4;
-        I::StoreRegisterSPRelativeImmediate { imm8, rt: R5 }.emit_into(mem)?;
-        imm8 += 4;
-        I::StoreRegisterSPRelativeImmediate { imm8, rt: R6 }.emit_into(mem)
+        let mut imm = 0;
+        I::StoreRegisterImmediate {
+            imm,
+            rn: SP,
+            rt: R4,
+        }
+        .emit_into(mem)?;
+        imm += 4;
+        I::StoreRegisterImmediate {
+            imm,
+            rn: SP,
+            rt: R5,
+        }
+        .emit_into(mem)?;
+        imm += 4;
+        I::StoreRegisterImmediate {
+            imm,
+            rn: SP,
+            rt: R6,
+        }
+        .emit_into(mem)
     }
 
-    fn restore_callee_save_registers(mem: &mut JitMemory) -> Result<(), Error>{
+    fn restore_callee_save_registers(mem: &mut JitMemory) -> Result<(), Error> {
         let mut imm = 0;
-        I::LoadRegisterImmediate { imm, rn: SP, rt: R4 }.emit_into(mem)?;
+        I::LoadRegisterImmediate {
+            imm,
+            rn: SP,
+            rt: R4,
+        }
+        .emit_into(mem)?;
         imm += 4;
-        I::LoadRegisterImmediate { imm, rn: SP, rt: R5 }.emit_into(mem)?;
+        I::LoadRegisterImmediate {
+            imm,
+            rn: SP,
+            rt: R5,
+        }
+        .emit_into(mem)?;
         imm += 4;
-        I::LoadRegisterImmediate { imm, rn: SP, rt: R6 }.emit_into(mem)?;
+        I::LoadRegisterImmediate {
+            imm,
+            rn: SP,
+            rt: R6,
+        }
+        .emit_into(mem)?;
         I::AddImmediateToSP { imm: 12 }.emit_into(mem)?;
 
         I::MoveRegistersSpecial { rm: R4, rd: R8 }.emit_into(mem)?;
