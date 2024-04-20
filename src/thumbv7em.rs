@@ -690,6 +690,7 @@ impl Encoding for ThreeRegistersEncoding {
         let opcode_mask = match self.class_opcode.opcode_length {
             2 => 0b11111,
             4 => 0b111,
+            _ => panic!("Unexpected opcode length in ThreeRegistersEncoding"),
         };
         encoding |= (self.opcode as u16 & opcode_mask) << 9;
         encoding |= (self.rm as u16 & 0b111) << 6;

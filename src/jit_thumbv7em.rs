@@ -24,9 +24,7 @@ use thumbv7em::*;
 /// - mbuff length
 /// - pointer to mem
 /// - mem length
-/// The last two arguments indicate to the JIT at which offset in the mbuff mem_ptr and mem_ptr + mem.len()
-/// should be stored; this is what happens with struct EbpfVmFixedMbuff.
-type MachineCode = unsafe fn(*mut u8, usize, *mut u8, usize, usize, usize) -> u64;
+type MachineCode = unsafe fn(*mut u8, usize, *mut u8, usize) -> u64;
 
 const PAGE_SIZE: usize = 4096;
 // TODO: check how long the page must be to be sure to support an eBPF program of maximum possible
@@ -127,12 +125,12 @@ impl JitCompiler {
         let registers = vec![R4, R5, R6, R7, LR];
         I::PushMultipleRegisters { registers }.emit_into(mem);
 
-        // R7: mbuff
-        // RSI: mbuff_len
+        // According to the ARM calling convention, arguments to the function
+        // are passed in registers R0-R3.
+        // R0: mbuff
+        // R1: mbuff_len
         // R2: mem
-        // R1: mem_len
-        // R8:  mem_offset
-        // R9:  mem_end_offset
+        // R3: mem_len
 
         // Save mem pointer for use with LD_ABS_* and LD_IND_* instructions
         //self.emit_mov(mem, R2, R10);
@@ -183,7 +181,6 @@ impl JitCompiler {
 
         self.pc_locs = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
 
-        /*
         let mut insn_ptr: usize = 0;
         while insn_ptr * ebpf::INSN_SIZE < prog.len() {
             let insn = ebpf::get_insn(prog, insn_ptr);
@@ -197,107 +194,120 @@ impl JitCompiler {
             match insn.opc {
                 // BPF_LD class
                 // R10 is a constant pointer to mem.
-                ebpf::LD_ABS_B => self.emit_load(mem, OperandSize::S8, R10, R0, insn.imm),
-                ebpf::LD_ABS_H => self.emit_load(mem, OperandSize::S16, R10, R0, insn.imm),
-                ebpf::LD_ABS_W => self.emit_load(mem, OperandSize::S32, R10, R0, insn.imm),
-                ebpf::LD_ABS_DW => self.emit_load(mem, OperandSize::S64, R10, R0, insn.imm),
-                ebpf::LD_IND_B => {
+                ebpf::LD_ABS_B => todo!(), //self.emit_load(mem, OperandSize::S8, R10, R0, insn.imm),
+                ebpf::LD_ABS_H => todo!(), //self.emit_load(mem, OperandSize::S16, R10, R0, insn.imm),
+                ebpf::LD_ABS_W => todo!(), //self.emit_load(mem, OperandSize::S32, R10, R0, insn.imm),
+                ebpf::LD_ABS_DW => todo!(), //self.emit_load(mem, OperandSize::S64, R10, R0, insn.imm),
+                ebpf::LD_IND_B => todo!(),
+                /*{
                     self.emit_mov(mem, R10, R11); // load mem into R11
                     self.emit_alu64(mem, 0x01, src, R11); // add src to R11
                     self.emit_load(mem, OperandSize::S8, R11, R0, insn.imm); // ld R0, mem[src+imm]
-                }
-                ebpf::LD_IND_H => {
+                }*/
+                ebpf::LD_IND_H => todo!(),
+                /*{
                     self.emit_mov(mem, R10, R11); // load mem into R11
                     self.emit_alu64(mem, 0x01, src, R11); // add src to R11
                     self.emit_load(mem, OperandSize::S16, R11, R0, insn.imm); // ld R0, mem[src+imm]
-                }
-                ebpf::LD_IND_W => {
+                }*/
+                ebpf::LD_IND_W => todo!(),
+                /*{
                     self.emit_mov(mem, R10, R11); // load mem into R11
                     self.emit_alu64(mem, 0x01, src, R11); // add src to R11
                     self.emit_load(mem, OperandSize::S32, R11, R0, insn.imm); // ld R0, mem[src+imm]
-                }
-                ebpf::LD_IND_DW => {
+                }*/
+                ebpf::LD_IND_DW => todo!(),
+                /*{
                     self.emit_mov(mem, R10, R11); // load mem into R11
                     self.emit_alu64(mem, 0x01, src, R11); // add src to R11
                     self.emit_load(mem, OperandSize::S64, R11, R0, insn.imm); // ld R0, mem[src+imm]
-                }
-
-                ebpf::LD_DW_IMM => {
+                }*/
+                ebpf::LD_DW_IMM => todo!(),
+                /*{
                     insn_ptr += 1;
                     let second_part = ebpf::get_insn(prog, insn_ptr).imm as u64;
                     let imm = (insn.imm as u32) as u64 | second_part.wrapping_shl(32);
                     self.emit_load_imm(mem, dst, imm as i64);
-                }
+                }*/
 
                 // BPF_LDX class
-                ebpf::LD_B_REG => self.emit_load(mem, OperandSize::S8, src, dst, insn.off as i32),
-                ebpf::LD_H_REG => self.emit_load(mem, OperandSize::S16, src, dst, insn.off as i32),
-                ebpf::LD_W_REG => self.emit_load(mem, OperandSize::S32, src, dst, insn.off as i32),
-                ebpf::LD_DW_REG => self.emit_load(mem, OperandSize::S64, src, dst, insn.off as i32),
+                ebpf::LD_B_REG => todo!(), //self.emit_load(mem, OperandSize::S8, src, dst, insn.off as i32),
+                ebpf::LD_H_REG => todo!(), //self.emit_load(mem, OperandSize::S16, src, dst, insn.off as i32),
+                ebpf::LD_W_REG => todo!(), //self.emit_load(mem, OperandSize::S32, src, dst, insn.off as i32),
+                ebpf::LD_DW_REG => todo!(), //self.emit_load(mem, OperandSize::S64, src, dst, insn.off as i32),
 
                 // BPF_ST class
-                ebpf::ST_B_IMM => {
+                ebpf::ST_B_IMM => todo!(),
+                /*{
                     self.emit_store_imm32(mem, OperandSize::S8, dst, insn.off as i32, insn.imm)
-                }
-                ebpf::ST_H_IMM => {
+                }*/
+                ebpf::ST_H_IMM => todo!(),
+                /*{
                     self.emit_store_imm32(mem, OperandSize::S16, dst, insn.off as i32, insn.imm)
-                }
-                ebpf::ST_W_IMM => {
+                }*/
+                ebpf::ST_W_IMM => todo!(),
+                /*{
                     self.emit_store_imm32(mem, OperandSize::S32, dst, insn.off as i32, insn.imm)
-                }
-                ebpf::ST_DW_IMM => {
+                }*/
+                ebpf::ST_DW_IMM => todo!(),
+                /*{
                     self.emit_store_imm32(mem, OperandSize::S64, dst, insn.off as i32, insn.imm)
-                }
+                }*/
 
                 // BPF_STX class
-                ebpf::ST_B_REG => self.emit_store(mem, OperandSize::S8, src, dst, insn.off as i32),
-                ebpf::ST_H_REG => self.emit_store(mem, OperandSize::S16, src, dst, insn.off as i32),
-                ebpf::ST_W_REG => self.emit_store(mem, OperandSize::S32, src, dst, insn.off as i32),
-                ebpf::ST_DW_REG => {
+                ebpf::ST_B_REG => todo!(), //self.emit_store(mem, OperandSize::S8, src, dst, insn.off as i32),
+                ebpf::ST_H_REG => todo!(), //self.emit_store(mem, OperandSize::S16, src, dst, insn.off as i32),
+                ebpf::ST_W_REG => todo!(), //self.emit_store(mem, OperandSize::S32, src, dst, insn.off as i32),
+                ebpf::ST_DW_REG => todo!(),
+                /*{
                     self.emit_store(mem, OperandSize::S64, src, dst, insn.off as i32)
-                }
+                }*/
                 ebpf::ST_W_XADD => unimplemented!(),
                 ebpf::ST_DW_XADD => unimplemented!(),
 
                 // BPF_ALU class
-                ebpf::ADD32_IMM => self.emit_alu32_imm32(mem, 0x81, 0, dst, insn.imm),
-                ebpf::ADD32_REG => self.emit_alu32(mem, 0x01, src, dst),
-                ebpf::SUB32_IMM => self.emit_alu32_imm32(mem, 0x81, 5, dst, insn.imm),
-                ebpf::SUB32_REG => self.emit_alu32(mem, 0x29, src, dst),
+                ebpf::ADD32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 0, dst, insn.imm),
+                ebpf::ADD32_REG => todo!(), //self.emit_alu32(mem, 0x01, src, dst),
+                ebpf::SUB32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 5, dst, insn.imm),
+                ebpf::SUB32_REG => todo!(), //self.emit_alu32(mem, 0x29, src, dst),
                 ebpf::MUL32_IMM
                 | ebpf::MUL32_REG
                 | ebpf::DIV32_IMM
                 | ebpf::DIV32_REG
                 | ebpf::MOD32_IMM
-                | ebpf::MOD32_REG => {
+                | ebpf::MOD32_REG => todo!(),
+                /*{
                     self.emit_muldivmod(mem, insn_ptr as u16, insn.opc, src, dst, insn.imm)
-                }
-                ebpf::OR32_IMM => self.emit_alu32_imm32(mem, 0x81, 1, dst, insn.imm),
-                ebpf::OR32_REG => self.emit_alu32(mem, 0x09, src, dst),
-                ebpf::AND32_IMM => self.emit_alu32_imm32(mem, 0x81, 4, dst, insn.imm),
-                ebpf::AND32_REG => self.emit_alu32(mem, 0x21, src, dst),
-                ebpf::LSH32_IMM => self.emit_alu32_imm8(mem, 0xc1, 4, dst, insn.imm as i8),
-                ebpf::LSH32_REG => {
+                }*/
+                ebpf::OR32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 1, dst, insn.imm),
+                ebpf::OR32_REG => todo!(), //self.emit_alu32(mem, 0x09, src, dst),
+                ebpf::AND32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 4, dst, insn.imm),
+                ebpf::AND32_REG => todo!(), //self.emit_alu32(mem, 0x21, src, dst),
+                ebpf::LSH32_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 4, dst, insn.imm as i8),
+                ebpf::LSH32_REG => todo!(),
+                /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu32(mem, 0xd3, 4, dst);
-                }
-                ebpf::RSH32_IMM => self.emit_alu32_imm8(mem, 0xc1, 5, dst, insn.imm as i8),
-                ebpf::RSH32_REG => {
+                }*/
+                ebpf::RSH32_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 5, dst, insn.imm as i8),
+                ebpf::RSH32_REG => todo!(),
+                /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu32(mem, 0xd3, 5, dst);
-                }
-                ebpf::NEG32 => self.emit_alu32(mem, 0xf7, 3, dst),
-                ebpf::XOR32_IMM => self.emit_alu32_imm32(mem, 0x81, 6, dst, insn.imm),
-                ebpf::XOR32_REG => self.emit_alu32(mem, 0x31, src, dst),
-                ebpf::MOV32_IMM => self.emit_alu32_imm32(mem, 0xc7, 0, dst, insn.imm),
-                ebpf::MOV32_REG => self.emit_mov(mem, src, dst),
-                ebpf::ARSH32_IMM => self.emit_alu32_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
-                ebpf::ARSH32_REG => {
+                }*/
+                ebpf::NEG32 => todo!(), //self.emit_alu32(mem, 0xf7, 3, dst),
+                ebpf::XOR32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 6, dst, insn.imm),
+                ebpf::XOR32_REG => todo!(), //self.emit_alu32(mem, 0x31, src, dst),
+                ebpf::MOV32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0xc7, 0, dst, insn.imm),
+                ebpf::MOV32_REG => todo!(), //self.emit_mov(mem, src, dst),
+                ebpf::ARSH32_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
+                ebpf::ARSH32_REG => todo!(),
+                /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu32(mem, 0xd3, 7, dst);
-                }
+                }*/
                 ebpf::LE => {} // No-op
-                ebpf::BE => {
+                ebpf::BE => todo!(),/*{
                     match insn.imm {
                         16 => {
                             // rol
@@ -318,228 +328,276 @@ impl JitCompiler {
                         }
                         _ => unreachable!(), // Should have been caught by verifier
                     }
-                }
+                }*/
 
                 // BPF_ALU64 class
-                ebpf::ADD64_IMM => self.emit_alu64_imm32(mem, 0x81, 0, dst, insn.imm),
-                ebpf::ADD64_REG => self.emit_alu64(mem, 0x01, src, dst),
-                ebpf::SUB64_IMM => self.emit_alu64_imm32(mem, 0x81, 5, dst, insn.imm),
-                ebpf::SUB64_REG => self.emit_alu64(mem, 0x29, src, dst),
+                ebpf::ADD64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 0, dst, insn.imm),
+                ebpf::ADD64_REG => todo!(), //self.emit_alu64(mem, 0x01, src, dst),
+                ebpf::SUB64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 5, dst, insn.imm),
+                ebpf::SUB64_REG => todo!(), //self.emit_alu64(mem, 0x29, src, dst),
                 ebpf::MUL64_IMM
                 | ebpf::MUL64_REG
                 | ebpf::DIV64_IMM
                 | ebpf::DIV64_REG
                 | ebpf::MOD64_IMM
-                | ebpf::MOD64_REG => {
+                | ebpf::MOD64_REG => todo!(),
+                /*{
                     self.emit_muldivmod(mem, insn_ptr as u16, insn.opc, src, dst, insn.imm)
-                }
-                ebpf::OR64_IMM => self.emit_alu64_imm32(mem, 0x81, 1, dst, insn.imm),
-                ebpf::OR64_REG => self.emit_alu64(mem, 0x09, src, dst),
-                ebpf::AND64_IMM => self.emit_alu64_imm32(mem, 0x81, 4, dst, insn.imm),
-                ebpf::AND64_REG => self.emit_alu64(mem, 0x21, src, dst),
-                ebpf::LSH64_IMM => self.emit_alu64_imm8(mem, 0xc1, 4, dst, insn.imm as i8),
-                ebpf::LSH64_REG => {
+                }*/
+                ebpf::OR64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 1, dst, insn.imm),
+                ebpf::OR64_REG => todo!(), //self.emit_alu64(mem, 0x09, src, dst),
+                ebpf::AND64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 4, dst, insn.imm),
+                ebpf::AND64_REG => todo!(), //self.emit_alu64(mem, 0x21, src, dst),
+                ebpf::LSH64_IMM => todo!(), //self.emit_alu64_imm8(mem, 0xc1, 4, dst, insn.imm as i8),
+                ebpf::LSH64_REG => todo!(),
+                /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu64(mem, 0xd3, 4, dst);
-                }
-                ebpf::RSH64_IMM => self.emit_alu64_imm8(mem, 0xc1, 5, dst, insn.imm as i8),
-                ebpf::RSH64_REG => {
+                }*/
+                ebpf::RSH64_IMM => todo!(), //self.emit_alu64_imm8(mem, 0xc1, 5, dst, insn.imm as i8),
+                ebpf::RSH64_REG => todo!(),
+                /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu64(mem, 0xd3, 5, dst);
-                }
-                ebpf::NEG64 => self.emit_alu64(mem, 0xf7, 3, dst),
-                ebpf::XOR64_IMM => self.emit_alu64_imm32(mem, 0x81, 6, dst, insn.imm),
-                ebpf::XOR64_REG => self.emit_alu64(mem, 0x31, src, dst),
-                ebpf::MOV64_IMM => self.emit_load_imm(mem, dst, insn.imm as i64),
-                ebpf::MOV64_REG => self.emit_mov(mem, src, dst),
-                ebpf::ARSH64_IMM => self.emit_alu64_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
-                ebpf::ARSH64_REG => {
+                }*/
+                ebpf::NEG64 => todo!(), //self.emit_alu64(mem, 0xf7, 3, dst),
+                ebpf::XOR64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 6, dst, insn.imm),
+                ebpf::XOR64_REG => todo!(), //self.emit_alu64(mem, 0x31, src, dst),
+                ebpf::MOV64_IMM => todo!(), //self.emit_load_imm(mem, dst, insn.imm as i64),
+                ebpf::MOV64_REG => todo!(), //self.emit_mov(mem, src, dst),
+                ebpf::ARSH64_IMM => todo!(), //self.emit_alu64_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
+                ebpf::ARSH64_REG => todo!(),
+                /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu64(mem, 0xd3, 7, dst);
-                }
+                }*/
 
                 // BPF_JMP class
-                ebpf::JA => self.emit_jmp(mem, target_pc),
-                ebpf::JEQ_IMM => {
+                ebpf::JA => todo!(), //self.emit_jmp(mem, target_pc),
+                ebpf::JEQ_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x84, target_pc);
-                }
-                ebpf::JEQ_REG => {
+                }*/
+                ebpf::JEQ_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x84, target_pc);
-                }
-                ebpf::JGT_IMM => {
+                }*/
+                ebpf::JGT_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x87, target_pc);
-                }
-                ebpf::JGT_REG => {
+                }*/
+                ebpf::JGT_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x87, target_pc);
-                }
-                ebpf::JGE_IMM => {
+                }*/
+                ebpf::JGE_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x83, target_pc);
-                }
-                ebpf::JGE_REG => {
+                }*/
+                ebpf::JGE_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x83, target_pc);
-                }
-                ebpf::JLT_IMM => {
+                }*/
+                ebpf::JLT_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x82, target_pc);
-                }
-                ebpf::JLT_REG => {
+                }*/
+                ebpf::JLT_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x82, target_pc);
-                }
-                ebpf::JLE_IMM => {
+                }*/
+                ebpf::JLE_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x86, target_pc);
-                }
-                ebpf::JLE_REG => {
+                }*/
+                ebpf::JLE_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x86, target_pc);
-                }
-                ebpf::JSET_IMM => {
+                }*/
+                ebpf::JSET_IMM => todo!(),
+                /*{
                     self.emit_alu64_imm32(mem, 0xf7, 0, dst, insn.imm);
                     self.emit_jcc(mem, 0x85, target_pc);
-                }
-                ebpf::JSET_REG => {
+                }*/
+                ebpf::JSET_REG => todo!(),
+                /*{
                     self.emit_alu64(mem, 0x85, src, dst);
                     self.emit_jcc(mem, 0x85, target_pc);
-                }
-                ebpf::JNE_IMM => {
+                }*/
+                ebpf::JNE_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x85, target_pc);
-                }
-                ebpf::JNE_REG => {
+                }*/
+                ebpf::JNE_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x85, target_pc);
-                }
-                ebpf::JSGT_IMM => {
+                }*/
+                ebpf::JSGT_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x8f, target_pc);
-                }
-                ebpf::JSGT_REG => {
+                }*/
+                ebpf::JSGT_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x8f, target_pc);
-                }
-                ebpf::JSGE_IMM => {
+                }*/
+                ebpf::JSGE_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x8d, target_pc);
-                }
-                ebpf::JSGE_REG => {
+                }*/
+                ebpf::JSGE_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x8d, target_pc);
-                }
-                ebpf::JSLT_IMM => {
+                }*/
+                ebpf::JSLT_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x8c, target_pc);
-                }
-                ebpf::JSLT_REG => {
+                }*/
+                ebpf::JSLT_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x8c, target_pc);
-                }
-                ebpf::JSLE_IMM => {
+                }*/
+                ebpf::JSLE_IMM => todo!(),
+                /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x8e, target_pc);
-                }
-                ebpf::JSLE_REG => {
+                }*/
+                ebpf::JSLE_REG => todo!(),
+                /*{
                     self.emit_cmp(mem, src, dst);
                     self.emit_jcc(mem, 0x8e, target_pc);
-                }
+                }*/
 
                 // BPF_JMP32 class
-                ebpf::JEQ_IMM32 => {
+                ebpf::JEQ_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x84, target_pc);
-                }
-                ebpf::JEQ_REG32 => {
+                }*/
+                ebpf::JEQ_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x84, target_pc);
-                }
-                ebpf::JGT_IMM32 => {
+                }*/
+                ebpf::JGT_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x87, target_pc);
-                }
-                ebpf::JGT_REG32 => {
+                }*/
+                ebpf::JGT_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x87, target_pc);
-                }
-                ebpf::JGE_IMM32 => {
+                }*/
+                ebpf::JGE_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x83, target_pc);
-                }
-                ebpf::JGE_REG32 => {
+                }*/
+                ebpf::JGE_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x83, target_pc);
-                }
-                ebpf::JLT_IMM32 => {
+                }*/
+                ebpf::JLT_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x82, target_pc);
-                }
-                ebpf::JLT_REG32 => {
+                }*/
+                ebpf::JLT_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x82, target_pc);
-                }
-                ebpf::JLE_IMM32 => {
+                }*/
+                ebpf::JLE_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x86, target_pc);
-                }
-                ebpf::JLE_REG32 => {
+                }*/
+                ebpf::JLE_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x86, target_pc);
-                }
-                ebpf::JSET_IMM32 => {
+                }*/
+                ebpf::JSET_IMM32 => todo!(),
+                /*{
                     self.emit_alu32_imm32(mem, 0xf7, 0, dst, insn.imm);
                     self.emit_jcc(mem, 0x85, target_pc);
-                }
-                ebpf::JSET_REG32 => {
+                }*/
+                ebpf::JSET_REG32 => todo!(),
+                /*{
                     self.emit_alu32(mem, 0x85, src, dst);
                     self.emit_jcc(mem, 0x85, target_pc);
-                }
-                ebpf::JNE_IMM32 => {
+                }*/
+                ebpf::JNE_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x85, target_pc);
-                }
-                ebpf::JNE_REG32 => {
+                }*/
+                ebpf::JNE_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x85, target_pc);
-                }
-                ebpf::JSGT_IMM32 => {
+                }*/
+                ebpf::JSGT_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x8f, target_pc);
-                }
-                ebpf::JSGT_REG32 => {
+                }*/
+                ebpf::JSGT_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x8f, target_pc);
-                }
-                ebpf::JSGE_IMM32 => {
+                }*/
+                ebpf::JSGE_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x8d, target_pc);
-                }
-                ebpf::JSGE_REG32 => {
+                }*/
+                ebpf::JSGE_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x8d, target_pc);
-                }
-                ebpf::JSLT_IMM32 => {
+                }*/
+                ebpf::JSLT_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x8c, target_pc);
-                }
-                ebpf::JSLT_REG32 => {
+                }*/
+                ebpf::JSLT_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x8c, target_pc);
-                }
-                ebpf::JSLE_IMM32 => {
+                }*/
+                ebpf::JSLE_IMM32 => todo!(),
+                /*{
                     self.emit_cmp32_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x8e, target_pc);
-                }
-                ebpf::JSLE_REG32 => {
+                }*/
+                ebpf::JSLE_REG32 => todo!(),
+                /*{
                     self.emit_cmp32(mem, src, dst);
                     self.emit_jcc(mem, 0x8e, target_pc);
-                }
+                }*/
 
-                ebpf::CALL => {
+                ebpf::CALL => todo!(), /*{
                     // For JIT, helpers in use MUST be registered at compile time. They can be
                     // updated later, but not created after compiling (we need the address of the
                     // helper function in the JIT-compiled program).
@@ -556,13 +614,13 @@ impl JitCompiler {
                             ),
                         ))?;
                     };
-                }
+                }*/
                 ebpf::TAIL_CALL => {
                     unimplemented!()
                 }
                 ebpf::EXIT => {
                     if insn_ptr != prog.len() / ebpf::INSN_SIZE - 1 {
-                        self.emit_jmp(mem, TARGET_PC_EXIT);
+                        I::BranchAndExchange { rm: LR }.emit_into(mem);
                     };
                 }
 
@@ -579,7 +637,6 @@ impl JitCompiler {
 
             insn_ptr += 1;
         }
-        */
 
         // Epilogue
         //self.set_anchor(mem, TARGET_PC_EXIT);
@@ -596,13 +653,14 @@ impl JitCompiler {
         I::AddImmediateToSP { imm: offset }.emit_into(mem);
         I::AddImmediateToSP { imm: offset }.emit_into(mem);
 
-        self.emit_mov_imm8(mem, 123, R0);
+        I::MoveImmediate { rd: R0, imm8: 123 }.emit_into(mem);
 
         // Restore callee-saved registers
         let registers = vec![R4, R5, R6, R7, PC];
         I::PopMultipleRegisters { registers }.emit_into(mem);
 
-        self.emit_b(mem, LR);
+
+        I::BranchAndExchange { rm: LR }.emit_into(mem);
 
         Ok(())
     }
