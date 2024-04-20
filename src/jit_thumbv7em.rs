@@ -241,9 +241,31 @@ impl JitCompiler {
                         ))?;
                     }
 
-                    I::LoadRegisterImmediate { imm5: insn.off as u8, rn: dst, rt: src }.emit_into(mem)
+                    // quick hack for negative offsets
+                    let off = if insn.off < 0 {
+                        (-1 *insn.off) as u8
+                    } else {
+                        insn.off as u8
+                    };
+
+                    // For now we don't have any load/store instruction which would allow
+                    // us for loading/storing values into registers higher than 7.
+                    // Because of this we handle the special case for SP and else
+                    // we return an error.
+                    if src == SP {
+                        I::LoadRegisterSPRelativeImmediate  { imm8: off as u8, rt: dst }.emit_into(mem)
+                    } else {
+                        if dst > 7 || src > 7 {
+                            Err(Error::new(
+                                ErrorKind::Other,
+                                format!(
+                                    "[JIT] Instruction LD_W_REG accessing registers with numbers that don't fit into 3 bits."
+                                ),
+                            ))?;
+                        }
+                       I::LoadRegisterImmediate  { imm5: off as u8, rn: src, rt: dst }.emit_into(mem)
+                    }
                 }
-                //self.emit_load(mem, OperandSize::S32, src, dst, insn.off as i32),
                 ebpf::LD_DW_REG => todo!(), //self.emit_load(mem, OperandSize::S64, src, dst, insn.off as i32),
 
                 // BPF_ST class
@@ -278,7 +300,30 @@ impl JitCompiler {
                         ))?;
                     }
 
-                    I::StoreRegisterImmediate { imm5: insn.off as u8, rn: dst, rt: src }.emit_into(mem)
+                    // quick hack for negative offsets
+                    let off = if insn.off < 0 {
+                        (-1 *insn.off) as u8
+                    } else {
+                        insn.off as u8
+                    };
+
+                    // For now we don't have any load/store instruction which would allow
+                    // us for loading/storing values into registers higher than 7.
+                    // Because of this we handle the special case for SP and else
+                    // we return an error.
+                    if dst == SP {
+                        I::StoreRegisterSPRelativeImmediate { imm8: off as u8, rt: src }.emit_into(mem)
+                    } else {
+                        if dst > 7 || src > 7 {
+                            Err(Error::new(
+                                ErrorKind::Other,
+                                format!(
+                                    "[JIT] Instruction ST_W_REG accessing registers with numbers that don't fit into 3 bits."
+                                ),
+                            ))?;
+                        }
+                       I::StoreRegisterImmediate { imm5: off as u8, rn: dst, rt: src }.emit_into(mem)
+                    }
                 }
                 //self.emit_store(mem, OperandSize::S32, src, dst, insn.off as i32),
                 ebpf::ST_DW_REG => todo!(),
@@ -382,7 +427,11 @@ impl JitCompiler {
 
                     I::Add8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)
                 }
-                ebpf::ADD64_REG => todo!(), //self.emit_alu64(mem, 0x01, src, dst),
+                ebpf::ADD64_REG => {
+                    I::AddRegistersSpecial { rm: src, rd: dst }.emit_into(mem)
+                }
+
+                //self.emit_alu64(mem, 0x01, src, dst),
                 ebpf::SUB64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 5, dst, insn.imm),
                 ebpf::SUB64_REG => todo!(), //self.emit_alu64(mem, 0x29, src, dst),
                 ebpf::MUL64_IMM

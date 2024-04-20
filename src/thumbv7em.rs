@@ -529,8 +529,8 @@ impl ThumbInstruction {
             }
             ThumbInstruction::LoadRegisterSPRelativeImmediate { imm8, rt } => {
                 const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1001, 4);
-                const STR_OPCODE: u8 = 0b1;
-                Immediate8OneRegisterEncoding::new(OP_A, STR_OPCODE, *imm8, *rt).encode()
+                const LDR_OPCODE: u8 = 0b1;
+                Immediate8OneRegisterEncoding::new(OP_A, LDR_OPCODE, *imm8, *rt).encode()
             }
             // Miscellaneous 16-bit instructions
             ThumbInstruction::AddImmediateToSP {
@@ -845,7 +845,7 @@ impl Encoding for Immediate8OneRegisterEncoding {
         self.class_opcode.apply(&mut encoding);
         let opcode_mask: u16 = match self.class_opcode.opcode_length {
             2 => 0b111,
-            4 => 0b11,
+            4 => 0b1,
             _ => panic!("Unexpected opcode length in Immediate8OneRegisterEncoding"),
         };
         encoding |= (self.opcode as u16 & opcode_mask) << 11;
@@ -1001,7 +1001,7 @@ impl Encoding for SpecialBranchEncoding {
         let mut encoding = 0;
         self.class_opcode.apply(&mut encoding);
         encoding |= (self.opcode as u16 & 0b111) << 7;
-        encoding |= (self.rm as u16 & 0b111) << 3;
+        encoding |= (self.rm as u16 & 0b1111) << 3;
         encoding
     }
 }
