@@ -24,7 +24,7 @@ use thumbv7em::*;
 /// - mbuff length
 /// - pointer to mem
 /// - mem length
-type MachineCode = unsafe fn(*mut u8, usize, *mut u8, usize) -> u64;
+type MachineCode = unsafe fn(*mut u8, usize, *mut u8, usize) -> u32;
 
 const PAGE_SIZE: usize = 4096;
 // TODO: check how long the page must be to be sure to support an eBPF program of maximum possible
@@ -54,7 +54,7 @@ const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
     R6, // 6  callee-saved
     R7, // 7  callee-saved
     R8, // 8  cannot callee-save 8 and 9 because the 16 bit thumb stack push instruction only works
-        // for R4-R7 and LR
+    // for R4-R7 and LR
     R9, // 9
     SP, // 10 stack pointer
         // R10 and R11 are used to compute store a constant pointer to mem and to compute offset for
@@ -121,9 +121,7 @@ impl JitCompiler {
         update_data_ptr: bool,
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
-        //  Save callee-saved registers
-        let registers = vec![R4, R5, R6, R7, LR];
-        I::PushMultipleRegisters { registers }.emit_into(mem);
+        Self::save_callee_save_registers(mem);
 
         // According to the ARM calling convention, arguments to the function
         // are passed in registers R0-R3.
@@ -134,6 +132,7 @@ impl JitCompiler {
 
         // Save mem pointer for use with LD_ABS_* and LD_IND_* instructions
         //self.emit_mov(mem, R2, R10);
+        I::MoveRegistersSpecial { rm: R2, rd: R10 }.emit_into(mem);
 
         /*
         match (use_mbuff, update_data_ptr) {
@@ -181,6 +180,7 @@ impl JitCompiler {
 
         self.pc_locs = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
 
+        /*
         let mut insn_ptr: usize = 0;
         while insn_ptr * ebpf::INSN_SIZE < prog.len() {
             let insn = ebpf::get_insn(prog, insn_ptr);
@@ -193,6 +193,10 @@ impl JitCompiler {
 
             match insn.opc {
                 // BPF_LD class
+                // In case of the LD ABS instructions we load the data from an
+                // absolute offset relative to the start of the memory buffer
+                // that has been made available to the program. This is done by
+                // storing the pointer to that memory in R10 and keeping it there.
                 // R10 is a constant pointer to mem.
                 ebpf::LD_ABS_B => todo!(), //self.emit_load(mem, OperandSize::S8, R10, R0, insn.imm),
                 ebpf::LD_ABS_H => todo!(), //self.emit_load(mem, OperandSize::S16, R10, R0, insn.imm),
@@ -637,6 +641,7 @@ impl JitCompiler {
 
             insn_ptr += 1;
         }
+        */
 
         // Epilogue
         //self.set_anchor(mem, TARGET_PC_EXIT);
@@ -653,12 +658,12 @@ impl JitCompiler {
         I::AddImmediateToSP { imm: offset }.emit_into(mem);
         I::AddImmediateToSP { imm: offset }.emit_into(mem);
 
-        I::MoveImmediate { rd: R0, imm8: 123 }.emit_into(mem);
+        //I::MoveImmediate { rd: R0, imm8: 123 }.emit_into(mem);
 
-        // Restore callee-saved registers
-        let registers = vec![R4, R5, R6, R7, PC];
-        I::PopMultipleRegisters { registers }.emit_into(mem);
+        // Here we test if we can return back the third argument
+        I::MoveRegistersSpecial { rm: R10, rd: R0 }.emit_into(mem);
 
+        Self::restore_callee_save_registers(mem);
 
         I::BranchAndExchange { rm: LR }.emit_into(mem);
 
@@ -689,6 +694,47 @@ impl JitCompiler {
             }
         }
         Ok(())
+    }
+
+    fn save_callee_save_registers(mem: &mut JitMemory) {
+        let registers = vec![R4, R5, R6, R7, LR];
+        I::PushMultipleRegisters { registers }.emit_into(mem);
+
+        // We also need to manually push R8, R10 and R11 as they cannot be pushed using push
+        // multiple instruction. We do this by first shifting the stack 3 slots downwards and then
+        // storing the registers in the newly freed slots. Each entry on the stack occupies 4B
+        // The problem is that store register immediate can only take in registers
+        // with 3-bit indices, therefore we need to first move R8, R10 and R11 to R4, R5 and R6
+        // We can do this as they have already been saved on the stack.
+        I::MoveRegistersSpecial { rm: R8, rd: R4 }.emit_into(mem);
+        I::MoveRegistersSpecial { rm: R10, rd: R5 }.emit_into(mem);
+        I::MoveRegistersSpecial { rm: R11, rd: R6 }.emit_into(mem);
+
+        I::SubtractImmediateFromSP { imm: 12 }.emit_into(mem);
+        let mut imm8 = 0;
+        I::StoreRegisterSPRelativeImmediate { imm8, rt: R4 }.emit_into(mem);
+        imm8 += 4;
+        I::StoreRegisterSPRelativeImmediate { imm8, rt: R5 }.emit_into(mem);
+        imm8 += 4;
+        I::StoreRegisterSPRelativeImmediate { imm8, rt: R6 }.emit_into(mem);
+    }
+
+    fn restore_callee_save_registers(mem: &mut JitMemory) {
+        let mut imm8 = 0;
+        I::LoadRegisterSPRelativeImmediate { imm8, rt: R4 }.emit_into(mem);
+        imm8 += 4;
+        I::LoadRegisterSPRelativeImmediate { imm8, rt: R5 }.emit_into(mem);
+        imm8 += 4;
+        I::LoadRegisterSPRelativeImmediate { imm8, rt: R6 }.emit_into(mem);
+        I::AddImmediateToSP { imm: 12 }.emit_into(mem);
+
+        I::MoveRegistersSpecial { rm: R4, rd: R8 }.emit_into(mem);
+        I::MoveRegistersSpecial { rm: R5, rd: R10 }.emit_into(mem);
+        I::MoveRegistersSpecial { rm: R6, rd: R11 }.emit_into(mem);
+
+        // Restore callee-saved registers
+        let registers = vec![R4, R5, R6, R7, PC];
+        I::PopMultipleRegisters { registers }.emit_into(mem);
     }
 } // impl JitCompiler
 

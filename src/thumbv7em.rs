@@ -21,9 +21,7 @@ pub const PC: u8 = 15;
 
 pub const ARGUMENT_REGISTERS: [u8; 4] = [R0, R1, R2, R3];
 
-// The short 16b version of push multiple doesn't allow for pushing registers
-// other than R0-R7 and LR so we can only save those
-pub const CALLEE_SAVED_REGISTERS: [u8; 4] = [R4, R5, R6, R7];
+pub const CALLEE_SAVED_REGISTERS: [u8; 7] = [R4, R5, R6, R7, R8, R10, R11];
 
 pub const INSTRUCTION_SIZE: u16 = 16;
 
@@ -36,71 +34,274 @@ pub const INSTRUCTION_SIZE: u16 = 16;
 /// registers.
 pub enum ThumbInstruction {
     // Shift (immediate), add, subtract, move, and compare
-    LogicalShiftLeftImmediate { imm5: u8, rm: u8, rd: u8 },
-    LogicalShiftRightImmediate { imm5: u8, rm: u8, rd: u8 },
-    ArithmeticShiftRightImmediate { imm5: u8, rm: u8, rd: u8 },
-    Add { rm: u8, rn: u8, rd: u8 },
-    Subtract { rm: u8, rn: u8, rd: u8 },
-    Add3BitImmediate { imm3: u8, rn: u8, rd: u8 },
-    Subtract3BitImmediate { imm3: u8, rn: u8, rd: u8 },
-    MoveImmediate { rd: u8, imm8: u8 },
-    CompareImmediate { rd: u8, imm8: u8 },
-    Add8BitImmediate { rd: u8, imm8: u8 },
-    Subtract8BitImmediate { rd: u8, imm8: u8 },
+    LogicalShiftLeftImmediate {
+        imm5: u8,
+        rm: u8,
+        rd: u8,
+    },
+    LogicalShiftRightImmediate {
+        imm5: u8,
+        rm: u8,
+        rd: u8,
+    },
+    ArithmeticShiftRightImmediate {
+        imm5: u8,
+        rm: u8,
+        rd: u8,
+    },
+    Add {
+        rm: u8,
+        rn: u8,
+        rd: u8,
+    },
+    Subtract {
+        rm: u8,
+        rn: u8,
+        rd: u8,
+    },
+    Add3BitImmediate {
+        imm3: u8,
+        rn: u8,
+        rd: u8,
+    },
+    Subtract3BitImmediate {
+        imm3: u8,
+        rn: u8,
+        rd: u8,
+    },
+    MoveImmediate {
+        rd: u8,
+        imm8: u8,
+    },
+    CompareImmediate {
+        rd: u8,
+        imm8: u8,
+    },
+    Add8BitImmediate {
+        rd: u8,
+        imm8: u8,
+    },
+    Subtract8BitImmediate {
+        rd: u8,
+        imm8: u8,
+    },
     // Data processing (operate mostly on registers)
-    BitwiseAND { rm: u8, rd: u8 },
-    ExclusiveOR { rm: u8, rd: u8 },
-    LogicalShiftLeft { rm: u8, rd: u8 },
-    LogicalShiftRight { rm: u8, rd: u8 },
-    ArithmeticShiftRight { rm: u8, rd: u8 },
-    AddWithCarry { rm: u8, rd: u8 },
-    SubtractWithCarry { rm: u8, rd: u8 },
-    RotateRight { rm: u8, rd: u8 },
-    SetFlagsOnBitwiseAND { rm: u8, rd: u8 },
-    ReverseSubtractFrom0 { rm: u8, rd: u8 },
-    Compare { rm: u8, rd: u8 },
-    CompareNegative { rm: u8, rd: u8 },
-    LogicalOR { rm: u8, rd: u8 },
-    MultiplyTwoRegisters { rm: u8, rd: u8 },
-    BitClear { rm: u8, rd: u8 },
-    BitwiseNOT { rm: u8, rd: u8 },
+    BitwiseAND {
+        rm: u8,
+        rd: u8,
+    },
+    ExclusiveOR {
+        rm: u8,
+        rd: u8,
+    },
+    LogicalShiftLeft {
+        rm: u8,
+        rd: u8,
+    },
+    LogicalShiftRight {
+        rm: u8,
+        rd: u8,
+    },
+    ArithmeticShiftRight {
+        rm: u8,
+        rd: u8,
+    },
+    AddWithCarry {
+        rm: u8,
+        rd: u8,
+    },
+    SubtractWithCarry {
+        rm: u8,
+        rd: u8,
+    },
+    RotateRight {
+        rm: u8,
+        rd: u8,
+    },
+    SetFlagsOnBitwiseAND {
+        rm: u8,
+        rd: u8,
+    },
+    ReverseSubtractFrom0 {
+        rm: u8,
+        rd: u8,
+    },
+    Compare {
+        rm: u8,
+        rd: u8,
+    },
+    CompareNegative {
+        rm: u8,
+        rd: u8,
+    },
+    LogicalOR {
+        rm: u8,
+        rd: u8,
+    },
+    MultiplyTwoRegisters {
+        rm: u8,
+        rd: u8,
+    },
+    BitClear {
+        rm: u8,
+        rd: u8,
+    },
+    BitwiseNOT {
+        rm: u8,
+        rd: u8,
+    },
     // Special data instructions and branch and exchange
-    AddRegistersSpecial { d: u8, rm: u8, rd: u8 },
-    CompareRegistersSpecial { n: u8, rm: u8, rd: u8 },
-    MoveRegistersSpecial { d: u8, rm: u8, rd: u8 },
-    BranchAndExchange { rm: u8 },
-    BranchWithLinkAndExchange { rm: u8 },
+    AddRegistersSpecial {
+        rm: u8,
+        rd: u8,
+    },
+    CompareRegistersSpecial {
+        rm: u8,
+        rd: u8,
+    },
+    MoveRegistersSpecial {
+        rm: u8,
+        rd: u8,
+    },
+    BranchAndExchange {
+        rm: u8,
+    },
+    BranchWithLinkAndExchange {
+        rm: u8,
+    },
     // Load/store single data item
-    StoreRegister { rm: u8, rn: u8, rt: u8 },
-    StoreRegisterHalfword { rm: u8, rn: u8, rt: u8 },
-    StoreRegisterByte { rm: u8, rn: u8, rt: u8 },
-    LoadRegisterSignedByte { rm: u8, rn: u8, rt: u8 },
-    LoadRegister { rm: u8, rn: u8, rt: u8 },
-    LoadRegisterHalfword { rm: u8, rn: u8, rt: u8 },
-    LoadRegisterByte { rm: u8, rn: u8, rt: u8 },
-    LoadRegisterSignedHalfword { rm: u8, rn: u8, rt: u8 },
-    StoreRegisterImmediate { imm5: u8, rn: u8, rt: u8 },
-    LoadRegisterImmediate { imm5: u8, rn: u8, rt: u8 },
-    StoreRegisterByteImmediate { imm5: u8, rn: u8, rt: u8 },
-    LoadRegisterByteImmediate { imm5: u8, rn: u8, rt: u8 },
-    StoreRegisterHalfwordImmediate { imm5: u8, rn: u8, rt: u8 },
-    LoadRegisterHalfwordImmediate { imm5: u8, rn: u8, rt: u8 },
-    StoreRegisterSPRelativeImmediate { imm8: u8, rt: u8 },
-    LoadRegisterSPRelativeImmediate { imm8: u8, rt: u8 },
+    /// Rt contains the data to store, Rn is the base address and Rm is the
+    /// offset register
+    StoreRegister {
+        rm: u8,
+        rn: u8,
+        rt: u8,
+    },
+    StoreRegisterHalfword {
+        rm: u8,
+        rn: u8,
+        rt: u8,
+    },
+    StoreRegisterByte {
+        rm: u8,
+        rn: u8,
+        rt: u8,
+    },
+    LoadRegisterSignedByte {
+        rm: u8,
+        rn: u8,
+        rt: u8,
+    },
+    LoadRegister {
+        rm: u8,
+        rn: u8,
+        rt: u8,
+    },
+    LoadRegisterHalfword {
+        rm: u8,
+        rn: u8,
+        rt: u8,
+    },
+    LoadRegisterByte {
+        rm: u8,
+        rn: u8,
+        rt: u8,
+    },
+    LoadRegisterSignedHalfword {
+        rm: u8,
+        rn: u8,
+        rt: u8,
+    },
+    /// Important: rt can only be R0-R7 as there are 3 bits specifying it
+    StoreRegisterImmediate {
+        imm5: u8,
+        rn: u8,
+        rt: u8,
+    },
+    LoadRegisterImmediate {
+        imm5: u8,
+        rn: u8,
+        rt: u8,
+    },
+    StoreRegisterByteImmediate {
+        imm5: u8,
+        rn: u8,
+        rt: u8,
+    },
+    LoadRegisterByteImmediate {
+        imm5: u8,
+        rn: u8,
+        rt: u8,
+    },
+    StoreRegisterHalfwordImmediate {
+        imm5: u8,
+        rn: u8,
+        rt: u8,
+    },
+    LoadRegisterHalfwordImmediate {
+        imm5: u8,
+        rn: u8,
+        rt: u8,
+    },
+    StoreRegisterSPRelativeImmediate {
+        imm8: u8,
+        rt: u8,
+    },
+    LoadRegisterSPRelativeImmediate {
+        imm8: u8,
+        rt: u8,
+    },
     // Miscellaneous 16-bit instructions
-    AddImmediateToSP { imm: u16 },
-    SubtractImmediateFromSP { imm: u16 },
-    CompareAndBranchOnZero { i: u8, imm5: u8, rn: u8 },
-    SignedExtendHalfword { rm: u8, rd: u8 },
-    SignedExtendByte { rm: u8, rd: u8 },
-    UnsignedExtendHalfword { rm: u8, rd: u8 },
-    UnsignedExtendByte { rm: u8, rd: u8 },
-    PushMultipleRegisters { registers: Vec<u8> },
-    ByteReverseWord { rm: u8, rd: u8 },
-    ByteReversePackedHalfword { rm: u8, rd: u8 },
-    ByteReverseSignedHalfword { rm: u8, rd: u8 },
-    CompareAndBranchOnNonZero { i: u8, imm5: u8, rn: u8 },
-    PopMultipleRegisters { registers: Vec<u8> },
+    AddImmediateToSP {
+        imm: u16,
+    },
+    SubtractImmediateFromSP {
+        imm: u16,
+    },
+    CompareAndBranchOnZero {
+        i: u8,
+        imm5: u8,
+        rn: u8,
+    },
+    SignedExtendHalfword {
+        rm: u8,
+        rd: u8,
+    },
+    SignedExtendByte {
+        rm: u8,
+        rd: u8,
+    },
+    UnsignedExtendHalfword {
+        rm: u8,
+        rd: u8,
+    },
+    UnsignedExtendByte {
+        rm: u8,
+        rd: u8,
+    },
+    PushMultipleRegisters {
+        registers: Vec<u8>,
+    },
+    ByteReverseWord {
+        rm: u8,
+        rd: u8,
+    },
+    ByteReversePackedHalfword {
+        rm: u8,
+        rd: u8,
+    },
+    ByteReverseSignedHalfword {
+        rm: u8,
+        rd: u8,
+    },
+    CompareAndBranchOnNonZero {
+        i: u8,
+        imm5: u8,
+        rn: u8,
+    },
+    PopMultipleRegisters {
+        registers: Vec<u8>,
+    },
     // If-Then and hints (not useful for now)
     // IfThen,
     // NoOperationHint,
@@ -109,7 +310,10 @@ pub enum ThumbInstruction {
     // WaitForInterruptHint,
     // SendEventHint,
     // Conditional branch and supervisor call
-    ConditionalBranch { cond: u8, imm8: u8 },
+    ConditionalBranch {
+        cond: u8,
+        imm8: u8,
+    },
     //SupervisorCall,
 }
 
@@ -227,17 +431,17 @@ impl ThumbInstruction {
                 TwoRegistersEncoding::new(DATA_PROCESSING, MVN_OPCODE, *rm, *rd).encode()
             }
             // Special data instructions and branch and exchange
-            ThumbInstruction::AddRegistersSpecial { d, rm, rd } => {
+            ThumbInstruction::AddRegistersSpecial { rm, rd } => {
                 const ADD_OPCODE: u8 = 0b00;
-                TwoRegistersSpecialEncoding::new(ADD_OPCODE, *d, *rm, *rd).encode()
+                TwoRegistersSpecialEncoding::new(ADD_OPCODE, *rm, *rd).encode()
             }
-            ThumbInstruction::CompareRegistersSpecial { n, rm, rd } => {
+            ThumbInstruction::CompareRegistersSpecial { rm, rd } => {
                 const CMP_OPCODE: u8 = 0b01;
-                TwoRegistersSpecialEncoding::new(CMP_OPCODE, *n, *rm, *rd).encode()
+                TwoRegistersSpecialEncoding::new(CMP_OPCODE, *rm, *rd).encode()
             }
-            ThumbInstruction::MoveRegistersSpecial { d, rm, rd } => {
+            ThumbInstruction::MoveRegistersSpecial { rm, rd } => {
                 const MOV_OPCODE: u8 = 0b10;
-                TwoRegistersSpecialEncoding::new(MOV_OPCODE, *d, *rm, *rd).encode()
+                TwoRegistersSpecialEncoding::new(MOV_OPCODE, *rm, *rd).encode()
             }
             ThumbInstruction::BranchAndExchange { rm } => {
                 const BX_OPCODE: u8 = 0b110;
@@ -332,14 +536,14 @@ impl ThumbInstruction {
             ThumbInstruction::AddImmediateToSP {
                 imm: immediate_offset,
             } => {
-                const ADD_OPCODE: u8 = 0b1;
+                const ADD_OPCODE: u8 = 0b0;
                 SPPlusMinusImmediateEncoding::new(ADD_OPCODE, *immediate_offset).encode()
             }
 
             ThumbInstruction::SubtractImmediateFromSP {
                 imm: immediate_offset,
             } => {
-                const SUBTRACT_OPCODE: u8 = 0b0;
+                const SUBTRACT_OPCODE: u8 = 0b1;
                 SPPlusMinusImmediateEncoding::new(SUBTRACT_OPCODE, *immediate_offset).encode()
             }
             ThumbInstruction::CompareAndBranchOnZero { i, imm5, rn } => {
@@ -411,7 +615,6 @@ impl ThumbInstruction {
             ThumbInstruction::ConditionalBranch { cond, imm8 } => {
                 ConditionalBranchEncoding::new(*cond, *imm8).encode()
             }
-
         };
 
         emit::<u16>(mem, encoding)
@@ -745,17 +948,15 @@ impl Encoding for TwoRegistersEncoding {
 pub struct TwoRegistersSpecialEncoding {
     class_opcode: InstructionClassOpcode,
     opcode: u8,
-    dn_or_n_bit: u8,
     rm: u8,
     rd: u8,
 }
 
 impl TwoRegistersSpecialEncoding {
-    pub fn new(opcode: u8, dn_or_n_bit: u8, rm: u8, rd: u8) -> TwoRegistersSpecialEncoding {
+    pub fn new(opcode: u8, rm: u8, rd: u8) -> TwoRegistersSpecialEncoding {
         TwoRegistersSpecialEncoding {
             class_opcode: SPECIAL_DATA_INSTRUCTIONS,
             opcode,
-            dn_or_n_bit,
             rm,
             rd,
         }
@@ -767,8 +968,13 @@ impl Encoding for TwoRegistersSpecialEncoding {
         let mut encoding = 0;
         self.class_opcode.apply(&mut encoding);
         encoding |= (self.opcode as u16 & 0b11) << 8;
-        encoding |= (self.dn_or_n_bit as u16 & 0b1) << 7;
-        encoding |= (self.rm as u16 & 0b111) << 3;
+        // According to the specification, the bits of the Rd (or Rn in case of comparison)
+        // are split into two chunks: D:rd where the D bit specified before rM
+        // like so `D:Rm:Rd`. The specification also says that it only works
+        // on Thumb if not both of the registers are from range R0-R7.
+        let d_bit = self.rd >> 3;
+        encoding |= (d_bit as u16 & 0b1) << 7;
+        encoding |= (self.rm as u16 & 0b1111) << 3;
         encoding |= self.rd as u16 & 0b111;
         encoding
     }
