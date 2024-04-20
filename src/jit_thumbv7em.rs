@@ -124,7 +124,7 @@ impl JitCompiler {
         update_data_ptr: bool, // This isn't used by my version of the jit.
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
-        Self::save_callee_save_registers(mem);
+        Self::save_callee_save_registers(mem)?;
 
         // According to the ARM calling convention, arguments to the function
         // are passed in registers R0-R3.
@@ -135,7 +135,7 @@ impl JitCompiler {
 
         // Save mem pointer for use with LD_ABS_* and LD_IND_* instructions
         //self.emit_mov(mem, R2, R10);
-        I::MoveRegistersSpecial { rm: R2, rd: R10 }.emit_into(mem);
+        I::MoveRegistersSpecial { rm: R2, rd: R10 }.emit_into(mem)?;
 
         // We need to adjust pointers to the packet buffer and mem according
         // to the eBPF specification
@@ -145,13 +145,13 @@ impl JitCompiler {
             // so it will end up in R0
             let rd = map_register(1); // eBPF R1
             if rd != R0 {
-                I::MoveRegistersSpecial { rm: R0, rd }.emit_into(mem);
+                I::MoveRegistersSpecial { rm: R0, rd }.emit_into(mem)?;
             }
         } else {
             // We do not use any mbuff. Move mem pointer into register 1.
             let rd = map_register(1); // eBPF R1
             if rd != R2 {
-                I::MoveRegistersSpecial { rm: R2, rd }.emit_into(mem);
+                I::MoveRegistersSpecial { rm: R2, rd }.emit_into(mem)?;
             }
         }
 
@@ -167,8 +167,8 @@ impl JitCompiler {
         // allows for shifting the stack by at most 4*127 bytes at once, we need
         // to do this twice to achieve the stack size of 512 used by eBPF.
         let offset = ebpf::STACK_SIZE as u16 / 2;
-        I::SubtractImmediateFromSP { imm: offset }.emit_into(mem);
-        I::SubtractImmediateFromSP { imm: offset }.emit_into(mem);
+        I::SubtractImmediateFromSP { imm: offset }.emit_into(mem)?;
+        I::SubtractImmediateFromSP { imm: offset }.emit_into(mem)?;
 
         self.pc_locs = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
 
@@ -231,40 +231,12 @@ impl JitCompiler {
                 ebpf::LD_B_REG => todo!(), //self.emit_load(mem, OperandSize::S8, src, dst, insn.off as i32),
                 ebpf::LD_H_REG => todo!(), //self.emit_load(mem, OperandSize::S16, src, dst, insn.off as i32),
                 ebpf::LD_W_REG => {
-                    if insn.off >> 5 > 0 {
-                        Err(Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "[JIT] Instruction LD_W_REG with immediate offset {:#x} which does not fit into 8 bits.",
-                                insn.off
-                            ),
-                        ))?;
-                    }
-
-                    // quick hack for negative offsets
-                    let off = if insn.off < 0 {
-                        (-1 *insn.off) as u8
-                    } else {
-                        insn.off as u8
-                    };
-
-                    // For now we don't have any load/store instruction which would allow
-                    // us for loading/storing values into registers higher than 7.
-                    // Because of this we handle the special case for SP and else
-                    // we return an error.
-                    if src == SP {
-                        I::LoadRegisterSPRelativeImmediate  { imm8: off as u8, rt: dst }.emit_into(mem)
-                    } else {
-                        if dst > 7 || src > 7 {
-                            Err(Error::new(
-                                ErrorKind::Other,
-                                format!(
-                                    "[JIT] Instruction LD_W_REG accessing registers with numbers that don't fit into 3 bits."
-                                ),
-                            ))?;
-                        }
-                       I::LoadRegisterImmediate  { imm5: off as u8, rn: src, rt: dst }.emit_into(mem)
-                    }
+                        // TODO: move this verification to the construction of the instruction
+                        // encoding to automatically select the correct one based on the
+                        // size of the register encoding
+                        //Self::verify_register_low(src)?;
+                        //Self::verify_register_low(dst)?;
+                        I::LoadRegisterImmediate  { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?
                 }
                 ebpf::LD_DW_REG => todo!(), //self.emit_load(mem, OperandSize::S64, src, dst, insn.off as i32),
 
@@ -290,15 +262,6 @@ impl JitCompiler {
                 ebpf::ST_B_REG => todo!(), //self.emit_store(mem, OperandSize::S8, src, dst, insn.off as i32),
                 ebpf::ST_H_REG => todo!(), //self.emit_store(mem, OperandSize::S16, src, dst, insn.off as i32),
                 ebpf::ST_W_REG => {
-                    if insn.off >> 5 > 0 {
-                        Err(Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "[JIT] Instruction ST_W_REG with immediate offset {:#x} which does not fit into 8 bits.",
-                                insn.off
-                            ),
-                        ))?;
-                    }
 
                     // quick hack for negative offsets
                     let off = if insn.off < 0 {
@@ -312,17 +275,13 @@ impl JitCompiler {
                     // Because of this we handle the special case for SP and else
                     // we return an error.
                     if dst == SP {
-                        I::StoreRegisterSPRelativeImmediate { imm8: off as u8, rt: src }.emit_into(mem)
+                        Self::verify_offset_size(insn.off, 8)?;
+                        I::StoreRegisterSPRelativeImmediate { imm8: off as u8, rt: src }.emit_into(mem)?;
                     } else {
-                        if dst > 7 || src > 7 {
-                            Err(Error::new(
-                                ErrorKind::Other,
-                                format!(
-                                    "[JIT] Instruction ST_W_REG accessing registers with numbers that don't fit into 3 bits."
-                                ),
-                            ))?;
-                        }
-                       I::StoreRegisterImmediate { imm5: off as u8, rn: dst, rt: src }.emit_into(mem)
+                        Self::verify_offset_size(insn.off, 5)?;
+                        Self::verify_register_low(dst)?;
+                        Self::verify_register_low(src)?;
+                        I::StoreRegisterImmediate { imm5: off as u8, rn: dst, rt: src }.emit_into(mem)?;
                     }
                 }
                 //self.emit_store(mem, OperandSize::S32, src, dst, insn.off as i32),
@@ -367,19 +326,8 @@ impl JitCompiler {
                 ebpf::XOR32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 6, dst, insn.imm),
                 ebpf::XOR32_REG => todo!(), //self.emit_alu32(mem, 0x31, src, dst),
                 ebpf::MOV32_IMM => {
-                    // If the immediate doesn't fit into 8bits, we cannot translate this
-                    // instruction
-                    if insn.imm >> 8 > 0 {
-                    Err(Error::new(
-                        ErrorKind::Other,
-                        format!(
-                            "[JIT] Instruction MOV32_IMM with immediate {:#x} which does not fit into 8 bits.",
-                            insn.imm
-                        ),
-                    ))?;
-
-                    }
-                    I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)
+                    Self::verify_immediate_size(insn.imm, 8)?;
+                    I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)?;
                 }
                 //self.emit_alu32_imm32(mem, 0xc7, 0, dst, insn.imm),
                 ebpf::MOV32_REG => todo!(), //self.emit_mov(mem, src, dst),
@@ -425,10 +373,10 @@ impl JitCompiler {
                         ))?;
                     }
 
-                    I::Add8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)
+                    I::Add8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
                 }
                 ebpf::ADD64_REG => {
-                    I::AddRegistersSpecial { rm: src, rd: dst }.emit_into(mem)
+                    I::AddRegistersSpecial { rm: src, rd: dst }.emit_into(mem)?;
                 }
 
                 //self.emit_alu64(mem, 0x01, src, dst),
@@ -475,7 +423,7 @@ impl JitCompiler {
                     ))?;
 
                     }
-                    I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)
+                    I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)?;
                 }
                 ebpf::MOV64_REG => todo!(), //self.emit_mov(mem, src, dst),
                 ebpf::ARSH64_IMM => todo!(), //self.emit_alu64_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
@@ -733,7 +681,7 @@ impl JitCompiler {
                 }
                 ebpf::EXIT => {
                     if insn_ptr != prog.len() / ebpf::INSN_SIZE - 1 {
-                        I::BranchAndExchange { rm: LR }.emit_into(mem);
+                        I::BranchAndExchange { rm: LR }.emit_into(mem)?;
                     };
                 }
 
@@ -763,17 +711,17 @@ impl JitCompiler {
         // The add immediate to SP instruction allows for at most 4*127 bytes
         // being shifted, so we need to do this twice to shift the stack by 512 bytes.
         let offset = ebpf::STACK_SIZE as u16 / 2;
-        I::AddImmediateToSP { imm: offset }.emit_into(mem);
-        I::AddImmediateToSP { imm: offset }.emit_into(mem);
+        I::AddImmediateToSP { imm: offset }.emit_into(mem)?;
+        I::AddImmediateToSP { imm: offset }.emit_into(mem)?;
 
         //I::MoveImmediate { rd: R0, imm8: 123 }.emit_into(mem);
 
         // Here we test if we can return back the third argument
         //I::MoveRegistersSpecial { rm: R10, rd: R0 }.emit_into(mem);
 
-        Self::restore_callee_save_registers(mem);
+        Self::restore_callee_save_registers(mem)?;
 
-        I::BranchAndExchange { rm: LR }.emit_into(mem);
+        I::BranchAndExchange { rm: LR }.emit_into(mem)?;
 
         Ok(())
     }
@@ -804,9 +752,9 @@ impl JitCompiler {
         Ok(())
     }
 
-    fn save_callee_save_registers(mem: &mut JitMemory) {
+    fn save_callee_save_registers(mem: &mut JitMemory) -> Result<(), Error> {
         let registers = vec![R4, R5, R6, R7, LR];
-        I::PushMultipleRegisters { registers }.emit_into(mem);
+        I::PushMultipleRegisters { registers }.emit_into(mem)?;
 
         // We also need to manually push R8, R10 and R11 as they cannot be pushed using push
         // multiple instruction. We do this by first shifting the stack 3 slots downwards and then
@@ -814,35 +762,76 @@ impl JitCompiler {
         // The problem is that store register immediate can only take in registers
         // with 3-bit indices, therefore we need to first move R8, R10 and R11 to R4, R5 and R6
         // We can do this as they have already been saved on the stack.
-        I::MoveRegistersSpecial { rm: R8, rd: R4 }.emit_into(mem);
-        I::MoveRegistersSpecial { rm: R10, rd: R5 }.emit_into(mem);
-        I::MoveRegistersSpecial { rm: R11, rd: R6 }.emit_into(mem);
+        I::MoveRegistersSpecial { rm: R8, rd: R4 }.emit_into(mem)?;
+        I::MoveRegistersSpecial { rm: R10, rd: R5 }.emit_into(mem)?;
+        I::MoveRegistersSpecial { rm: R11, rd: R6 }.emit_into(mem)?;
 
-        I::SubtractImmediateFromSP { imm: 12 }.emit_into(mem);
+        I::SubtractImmediateFromSP { imm: 12 }.emit_into(mem)?;
         let mut imm8 = 0;
-        I::StoreRegisterSPRelativeImmediate { imm8, rt: R4 }.emit_into(mem);
+        I::StoreRegisterSPRelativeImmediate { imm8, rt: R4 }.emit_into(mem)?;
         imm8 += 4;
-        I::StoreRegisterSPRelativeImmediate { imm8, rt: R5 }.emit_into(mem);
+        I::StoreRegisterSPRelativeImmediate { imm8, rt: R5 }.emit_into(mem)?;
         imm8 += 4;
-        I::StoreRegisterSPRelativeImmediate { imm8, rt: R6 }.emit_into(mem);
+        I::StoreRegisterSPRelativeImmediate { imm8, rt: R6 }.emit_into(mem)
     }
 
-    fn restore_callee_save_registers(mem: &mut JitMemory) {
-        let mut imm8 = 0;
-        I::LoadRegisterSPRelativeImmediate { imm8, rt: R4 }.emit_into(mem);
-        imm8 += 4;
-        I::LoadRegisterSPRelativeImmediate { imm8, rt: R5 }.emit_into(mem);
-        imm8 += 4;
-        I::LoadRegisterSPRelativeImmediate { imm8, rt: R6 }.emit_into(mem);
-        I::AddImmediateToSP { imm: 12 }.emit_into(mem);
+    fn restore_callee_save_registers(mem: &mut JitMemory) -> Result<(), Error>{
+        let mut imm = 0;
+        I::LoadRegisterImmediate { imm, rn: SP, rt: R4 }.emit_into(mem)?;
+        imm += 4;
+        I::LoadRegisterImmediate { imm, rn: SP, rt: R5 }.emit_into(mem)?;
+        imm += 4;
+        I::LoadRegisterImmediate { imm, rn: SP, rt: R6 }.emit_into(mem)?;
+        I::AddImmediateToSP { imm: 12 }.emit_into(mem)?;
 
-        I::MoveRegistersSpecial { rm: R4, rd: R8 }.emit_into(mem);
-        I::MoveRegistersSpecial { rm: R5, rd: R10 }.emit_into(mem);
-        I::MoveRegistersSpecial { rm: R6, rd: R11 }.emit_into(mem);
+        I::MoveRegistersSpecial { rm: R4, rd: R8 }.emit_into(mem)?;
+        I::MoveRegistersSpecial { rm: R5, rd: R10 }.emit_into(mem)?;
+        I::MoveRegistersSpecial { rm: R6, rd: R11 }.emit_into(mem)?;
 
         // Restore callee-saved registers
         let registers = vec![R4, R5, R6, R7, PC];
-        I::PopMultipleRegisters { registers }.emit_into(mem);
+        I::PopMultipleRegisters { registers }.emit_into(mem)
+    }
+
+    /// Verifies that a given immediate value fits into a bitstring of length
+    /// `size`.
+    fn verify_immediate_size(imm: i32, size: usize) -> Result<(), Error> {
+        if imm > (1 << size) {
+            Err(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "[JIT] Immediate {:#x} does not fit into {} bits.",
+                    imm, size
+                ),
+            ))?;
+        }
+        Ok(())
+    }
+
+    /// Verifies that a given offset value fits into a bitstring of length
+    /// `size`.
+    fn verify_offset_size(off: i16, size: usize) -> Result<(), Error> {
+        if off > (1 << size) {
+            Err(Error::new(
+                ErrorKind::Other,
+                format!("[JIT] Offset {:#x} does not fit into {} bits.", off, size),
+            ))?;
+        }
+        Ok(())
+    }
+
+    /// Some instructions only support registers in range R0-R7 because they
+    /// use 3 bits to specify the register number. Because of this, before
+    /// calling those functions we need to verify that the `src` and `dst` values
+    /// fit into 3 bits.
+    fn verify_register_low(reg: u8) -> Result<(), Error> {
+        if reg > 0b111 {
+            Err(Error::new(
+                ErrorKind::Other,
+                format!("[JIT] Register {} does not fit into 3 bits.", reg),
+            ))?;
+        }
+        Ok(())
     }
 } // impl JitCompiler
 
