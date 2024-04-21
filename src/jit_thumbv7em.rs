@@ -237,20 +237,10 @@ impl JitCompiler {
                 }*/
 
                 // BPF_LDX class
-                ebpf::LD_B_REG => todo!(), //self.emit_load(mem, OperandSize::S8, src, dst, insn.off as i32),
-                ebpf::LD_H_REG => {
-                    I::LoadRegisterHalfwordImmediate { imm: insn.imm, rn: src, rt: dst }.emit_into(mem)?;
-                }
-                ebpf::LD_W_REG => {
-                        // TODO: move this verification to the construction of the instruction
-                        // encoding to automatically select the correct one based on the
-                        // size of the register encoding
-                        //Self::verify_register_low(src)?;
-                        //Self::verify_register_low(dst)?;
-                        I::LoadRegisterImmediate  { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?
-                }
-                ebpf::LD_DW_REG => todo!(), //self.emit_load(mem, OperandSize::S64, src, dst, insn.off as i32),
-
+                ebpf::LD_B_REG => I::LoadRegisterByteImmediate { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?,
+                ebpf::LD_H_REG => I::LoadRegisterHalfwordImmediate { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?,
+                ebpf::LD_W_REG =>  I::LoadRegisterImmediate  { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?,
+                ebpf::LD_DW_REG => error_32_bit_arch()?,
                 // BPF_ST class
                 ebpf::ST_B_IMM => {
 
@@ -272,19 +262,10 @@ impl JitCompiler {
                 }*/
 
                 // BPF_STX class
-                ebpf::ST_B_REG => {
-                }
-                ebpf::ST_H_REG => {
-                    I::StoreRegisterHalfwordImmediate { imm5: insn.imm as u8, rn: dst, rt: src }.emit_into(mem)?;
-                }
-                ebpf::ST_W_REG => {
-                    I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?
-                }
-                //self.emit_store(mem, OperandSize::S32, src, dst, insn.off as i32),
-                ebpf::ST_DW_REG => todo!(),
-                /*{
-                    self.emit_store(mem, OperandSize::S64, src, dst, insn.off as i32)
-                }*/
+                ebpf::ST_B_REG => I::StoreRegisterByteImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
+                ebpf::ST_H_REG => I::StoreRegisterHalfwordImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
+                ebpf::ST_W_REG => I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
+                ebpf::ST_DW_REG => error_32_bit_arch()?,
                 ebpf::ST_W_XADD => unimplemented!(),
                 ebpf::ST_DW_XADD => unimplemented!(),
 
@@ -915,3 +896,10 @@ impl<'a> std::fmt::Debug for JitMemory<'a> {
     }
 }
 */
+
+fn error_32_bit_arch() -> Result<(), Error> {
+    Err(Error::new(
+        ErrorKind::Other,
+        format!("[JIT] Attempted to compile a 64-bit instruction on a 32-bit ARMv7-eM architecture."),
+    ))
+}
