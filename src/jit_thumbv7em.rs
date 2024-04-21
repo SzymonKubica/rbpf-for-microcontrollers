@@ -272,47 +272,100 @@ impl JitCompiler {
                 ebpf::ST_W_XADD => unimplemented!(),
                 ebpf::ST_DW_XADD => unimplemented!(),
 
-                // BPF_ALU class
-                ebpf::ADD32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 0, dst, insn.imm),
-                ebpf::ADD32_REG => todo!(), //self.emit_alu32(mem, 0x01, src, dst),
-                ebpf::SUB32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 5, dst, insn.imm),
-                ebpf::SUB32_REG => todo!(), //self.emit_alu32(mem, 0x29, src, dst),
-                ebpf::MUL32_IMM
-                | ebpf::MUL32_REG
-                | ebpf::DIV32_IMM
-                | ebpf::DIV32_REG
-                | ebpf::MOD32_IMM
-                | ebpf::MOD32_REG => todo!(),
+                // BPF_ALU and BPF_ALU64 classes, we treat both of them in the
+                // same way as our architecture is 32bit
+                ebpf::ADD32_IMM | ebpf::ADD64_IMM => {
+                    // Given that we are running on a 32 bit architecture, we treat
+                    // both 32 and 64 bit instructions the same but fail to jit if the operand
+                    // doesn't fit into 32 bits.
+                    if insn.imm >> 8 > 0 {
+                        Err(Error::new(
+                            ErrorKind::Other,
+                            format!(
+                                "[JIT] Instruction with immediate {:#x} which does not fit into 8 bits.",
+                                insn.imm
+                            ),
+                        ))?;
+                    }
+
+                    // The compiler sometimes emits add with negative immediates
+                    // se we need to handle it here:
+                    if insn.imm < 0 {
+                        let imm = -1 * insn.imm;
+                        I::Subtract8BitImmediate { rd: dst, imm8: imm as u8 }.emit_into(mem)?;
+                    } else {
+                        // TODO: make add pick the right instruction based on the size
+                        // of the immediate and register numbers.
+                        I::Add8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    }
+                }
+                ebpf::ADD32_REG | ebpf::ADD64_REG => {
+                    I::AddRegistersSpecial { rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::SUB32_IMM | ebpf::SUB64_IMM => {
+                    if insn.imm >> 8 > 0 {
+                        Err(Error::new(
+                            ErrorKind::Other,
+                            format!(
+                                "[JIT] Instruction with immediate {:#x} which does not fit into 8 bits.",
+                                insn.imm
+                            ),
+                        ))?;
+                    }
+                    I::Subtract8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                }
+                ebpf::SUB32_REG | ebpf::SUB64_REG => {
+                    I::Subtract { rm: insn.src, rn: insn.dst, rd: insn.dst } .emit_into(mem)?;
+                }
+                ebpf::MUL32_IMM | ebpf::MUL64_IMM => {
+                    // The ARMv7-eM architecture does not support multiplication with an immediate
+                    // we need to move the value into some register and then perform
+                    // multiplication.
+                    // We could use R11 for it as it isn't used by the eBPF ISA, so it is
+                    // guaranteed to not hold any important information.
+                    //
+                    // Problem: right now we can only move into registers from range R0-R7,
+                    // so we store the value in R4 and hope we didn't overwrite anything
+                    // TODO: implement the move instruction for larger encodings
+                    // and then use it here to move the immediate into R11
+                    I::MoveImmediate { rd: R4, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::MultiplyTwoRegisters { rm: R4, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::MUL32_REG | ebpf::MUL64_REG=> todo!(),
+                ebpf::DIV32_IMM | ebpf::DIV64_IMM=> todo!(),
+                ebpf::DIV32_REG | ebpf::DIV64_REG=> todo!(),
+                ebpf::MOD32_IMM | ebpf::MOD64_IMM=> todo!(),
+                ebpf::MOD32_REG | ebpf::MOD64_REG => todo!(),
                 /*{
                     self.emit_muldivmod(mem, insn_ptr as u16, insn.opc, src, dst, insn.imm)
                 }*/
-                ebpf::OR32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 1, dst, insn.imm),
-                ebpf::OR32_REG => todo!(), //self.emit_alu32(mem, 0x09, src, dst),
-                ebpf::AND32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 4, dst, insn.imm),
-                ebpf::AND32_REG => todo!(), //self.emit_alu32(mem, 0x21, src, dst),
-                ebpf::LSH32_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 4, dst, insn.imm as i8),
-                ebpf::LSH32_REG => todo!(),
+                ebpf::OR32_IMM | ebpf::OR64_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 1, dst, insn.imm),
+                ebpf::OR32_REG | ebpf::OR64_REG => todo!(), //self.emit_alu32(mem, 0x09, src, dst),
+                ebpf::AND32_IMM | ebpf::AND64_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 4, dst, insn.imm),
+                ebpf::AND32_REG | ebpf::AND64_REG => todo!(), //self.emit_alu32(mem, 0x21, src, dst),
+                ebpf::LSH32_IMM | ebpf::LSH64_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 4, dst, insn.imm as i8),
+                ebpf::LSH32_REG | ebpf::LSH64_REG => todo!(),
                 /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu32(mem, 0xd3, 4, dst);
                 }*/
-                ebpf::RSH32_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 5, dst, insn.imm as i8),
-                ebpf::RSH32_REG => todo!(),
+                ebpf::RSH32_IMM | ebpf::RSH64_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 5, dst, insn.imm as i8),
+                ebpf::RSH32_REG | ebpf::RSH64_REG => todo!(),
                 /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu32(mem, 0xd3, 5, dst);
                 }*/
-                ebpf::NEG32 => todo!(), //self.emit_alu32(mem, 0xf7, 3, dst),
-                ebpf::XOR32_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 6, dst, insn.imm),
-                ebpf::XOR32_REG => todo!(), //self.emit_alu32(mem, 0x31, src, dst),
-                ebpf::MOV32_IMM => {
+                ebpf::NEG32 | ebpf::NEG64 => todo!(), //self.emit_alu32(mem, 0xf7, 3, dst),
+                ebpf::XOR32_IMM | ebpf::XOR64_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 6, dst, insn.imm),
+                ebpf::XOR32_REG | ebpf::XOR64_REG => todo!(), //self.emit_alu32(mem, 0x31, src, dst),
+                ebpf::MOV32_IMM | ebpf::MOV64_IMM => {
                     Self::verify_immediate_size(insn.imm, 8)?;
                     I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)?;
                 }
                 //self.emit_alu32_imm32(mem, 0xc7, 0, dst, insn.imm),
-                ebpf::MOV32_REG => todo!(), //self.emit_mov(mem, src, dst),
-                ebpf::ARSH32_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
-                ebpf::ARSH32_REG => todo!(),
+                ebpf::MOV32_REG | ebpf::MOV64_REG => todo!(), //self.emit_mov(mem, src, dst),
+                ebpf::ARSH32_IMM | ebpf::ARSH64_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
+                ebpf::ARSH32_REG | ebpf::ARSH64_REG => todo!(),
                 /*{
                     self.emit_mov(mem, src, R1);
                     self.emit_alu32(mem, 0xd3, 7, dst);
@@ -340,79 +393,6 @@ impl JitCompiler {
                         _ => unreachable!(), // Should have been caught by verifier
                     }
                 }*/
-
-                // BPF_ALU64 class
-                ebpf::ADD64_IMM => {
-                    if insn.imm >> 8 > 0 {
-                        Err(Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "[JIT] Instruction ADD64_IMM with immediate {:#x} which does not fit into 8 bits.",
-                                insn.imm
-                            ),
-                        ))?;
-                    }
-
-                    I::Add8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
-                }
-                ebpf::ADD64_REG => {
-                    I::AddRegistersSpecial { rm: src, rd: dst }.emit_into(mem)?;
-                }
-
-                //self.emit_alu64(mem, 0x01, src, dst),
-                ebpf::SUB64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 5, dst, insn.imm),
-                ebpf::SUB64_REG => todo!(), //self.emit_alu64(mem, 0x29, src, dst),
-                ebpf::MUL64_IMM
-                | ebpf::MUL64_REG
-                | ebpf::DIV64_IMM
-                | ebpf::DIV64_REG
-                | ebpf::MOD64_IMM
-                | ebpf::MOD64_REG => todo!(),
-                /*{
-                    self.emit_muldivmod(mem, insn_ptr as u16, insn.opc, src, dst, insn.imm)
-                }*/
-                ebpf::OR64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 1, dst, insn.imm),
-                ebpf::OR64_REG => todo!(), //self.emit_alu64(mem, 0x09, src, dst),
-                ebpf::AND64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 4, dst, insn.imm),
-                ebpf::AND64_REG => todo!(), //self.emit_alu64(mem, 0x21, src, dst),
-                ebpf::LSH64_IMM => todo!(), //self.emit_alu64_imm8(mem, 0xc1, 4, dst, insn.imm as i8),
-                ebpf::LSH64_REG => todo!(),
-                /*{
-                    self.emit_mov(mem, src, R1);
-                    self.emit_alu64(mem, 0xd3, 4, dst);
-                }*/
-                ebpf::RSH64_IMM => todo!(), //self.emit_alu64_imm8(mem, 0xc1, 5, dst, insn.imm as i8),
-                ebpf::RSH64_REG => todo!(),
-                /*{
-                    self.emit_mov(mem, src, R1);
-                    self.emit_alu64(mem, 0xd3, 5, dst);
-                }*/
-                ebpf::NEG64 => todo!(), //self.emit_alu64(mem, 0xf7, 3, dst),
-                ebpf::XOR64_IMM => todo!(), //self.emit_alu64_imm32(mem, 0x81, 6, dst, insn.imm),
-                ebpf::XOR64_REG => todo!(), //self.emit_alu64(mem, 0x31, src, dst),
-                ebpf::MOV64_IMM => {
-                    // If the immediate doesn't fit into 8bits, we cannot translate this
-                    // instruction
-                    if insn.imm >> 8 > 0 {
-                    Err(Error::new(
-                        ErrorKind::Other,
-                        format!(
-                            "[JIT] Instruction MOV32_IMM with immediate {:#x} which does not fit into 8 bits.",
-                            insn.imm
-                        ),
-                    ))?;
-
-                    }
-                    I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)?;
-                }
-                ebpf::MOV64_REG => todo!(), //self.emit_mov(mem, src, dst),
-                ebpf::ARSH64_IMM => todo!(), //self.emit_alu64_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
-                ebpf::ARSH64_REG => todo!(),
-                /*{
-                    self.emit_mov(mem, src, R1);
-                    self.emit_alu64(mem, 0xd3, 7, dst);
-                }*/
-
                 // BPF_JMP class
                 ebpf::JA => todo!(), //self.emit_jmp(mem, target_pc),
                 ebpf::JEQ_IMM => todo!(),

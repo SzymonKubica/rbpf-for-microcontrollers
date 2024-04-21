@@ -91,6 +91,8 @@ mod interpreter_raw_elf_file;
 mod interpreter_common;
 mod jit_thumbv7em;
 mod thumbv7em;
+mod thumb_16bit_encoding;
+mod thumb_32bit_encoding;
 
 pub use verifier::check_helpers;
 #[cfg(jit)]
