@@ -70,7 +70,8 @@ const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
 /// in the Thumb ISA used by the Cortex M, because of this, we need to move the
 /// immediate constant into some register and then use the instruction which operates
 /// on registers. We use this register for that.
-const SPILL_REG: u8 = R4;
+const SPILL_REG1: u8 = R3;
+const SPILL_REG2: u8 = R4;
 
 // Return the ARMv7-eM register for the given eBPF register
 fn map_register(r: u8) -> u8 {
@@ -249,7 +250,9 @@ impl JitCompiler {
                 ebpf::LD_DW_REG => todo!(), //self.emit_load(mem, OperandSize::S64, src, dst, insn.off as i32),
 
                 // BPF_ST class
-                ebpf::ST_B_IMM => todo!(),
+                ebpf::ST_B_IMM => {
+
+                }
                 /*{
                     self.emit_store_imm32(mem, OperandSize::S8, dst, insn.off as i32, insn.imm)
                 }*/
@@ -267,8 +270,11 @@ impl JitCompiler {
                 }*/
 
                 // BPF_STX class
-                ebpf::ST_B_REG => todo!(), //self.emit_store(mem, OperandSize::S8, src, dst, insn.off as i32),
-                ebpf::ST_H_REG => todo!(), //self.emit_store(mem, OperandSize::S16, src, dst, insn.off as i32),
+                ebpf::ST_B_REG => {
+                }
+                ebpf::ST_H_REG => {
+                    I::StoreRegisterHalfwordImmediate { imm5: insn.imm as u8, rn: dst, rt: src }.emit_into(mem)?;
+                }
                 ebpf::ST_W_REG => {
                     I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?
                 }
@@ -336,8 +342,8 @@ impl JitCompiler {
                     // so we store the value in R4 (SPILL_REG) and hope we didn't overwrite anything
                     // TODO: implement the move instruction for larger encodings
                     // and then use it here to move the immediate into R11
-                    I::MoveImmediate { rd: SPILL_REG, imm8: insn.imm as u8 }.emit_into(mem)?;
-                    I::MultiplyTwoRegisters { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm as u8 }.emit_into(mem)?;
+                    I::MultiplyTwoRegisters { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::MUL32_REG | ebpf::MUL64_REG => {
                     I::MultiplyTwoRegisters { rm: src, rd: dst }.emit_into(mem)?;
@@ -350,15 +356,15 @@ impl JitCompiler {
                     self.emit_muldivmod(mem, insn_ptr as u16, insn.opc, src, dst, insn.imm)
                 }*/
                 ebpf::OR32_IMM | ebpf::OR64_IMM => {
-                    I::MoveImmediate { rd: SPILL_REG, imm8: insn.imm as u8 }.emit_into(mem)?;
-                    I::LogicalOR { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm as u8 }.emit_into(mem)?;
+                    I::LogicalOR { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::OR32_REG | ebpf::OR64_REG => {
                     I::LogicalOR { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::AND32_IMM | ebpf::AND64_IMM => {
-                    I::MoveImmediate { rd: SPILL_REG, imm8: insn.imm as u8 }.emit_into(mem)?;
-                    I::BitwiseAND { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm as u8 }.emit_into(mem)?;
+                    I::BitwiseAND { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::AND32_REG | ebpf::AND64_REG => {
                     I::BitwiseAND { rm: src, rd: dst }.emit_into(mem)?;
@@ -379,15 +385,15 @@ impl JitCompiler {
                     I::BitwiseNOT { rm: dst, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::XOR32_IMM | ebpf::XOR64_IMM => {
-                    I::MoveImmediate { rd: SPILL_REG, imm8: insn.imm as u8 }.emit_into(mem)?;
-                    I::ExclusiveOR  { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm as u8 }.emit_into(mem)?;
+                    I::ExclusiveOR  { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::XOR32_REG | ebpf::XOR64_REG => {
                     I::ExclusiveOR { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::MOV32_IMM | ebpf::MOV64_IMM => {
                     Self::verify_immediate_size(insn.imm, 8)?;
-                    I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)?;
+                    I::MoveImmediate { rd: dst, imm: insn.imm as u8}.emit_into(mem)?;
                 }
                 ebpf::MOV32_REG | ebpf::MOV64_REG => {
                     I::MoveRegistersSpecial { rm: src, rd: dst }.emit_into(mem)?;
@@ -396,7 +402,7 @@ impl JitCompiler {
                     I::ArithmeticShiftRightImmediate { imm5: insn.imm as u8, rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::ARSH32_REG | ebpf::ARSH64_REG => {
-                    I::ArithmeticShiftRight { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                    I::ArithmeticShiftRight { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::LE => {} // No-op
                 ebpf::BE => todo!(),/*{
@@ -756,50 +762,22 @@ impl JitCompiler {
 
         I::SubtractImmediateFromSP { imm: 12 }.emit_into(mem)?;
         let mut imm = 0;
-        I::StoreRegisterImmediate {
-            imm,
-            rn: SP,
-            rt: R4,
-        }
-        .emit_into(mem)?;
+        let rn = SP;
+        I::StoreRegisterImmediate { imm, rn, rt: R4 }.emit_into(mem)?;
         imm += 4;
-        I::StoreRegisterImmediate {
-            imm,
-            rn: SP,
-            rt: R5,
-        }
-        .emit_into(mem)?;
+        I::StoreRegisterImmediate { imm, rn, rt: R5 }.emit_into(mem)?;
         imm += 4;
-        I::StoreRegisterImmediate {
-            imm,
-            rn: SP,
-            rt: R6,
-        }
-        .emit_into(mem)
+        I::StoreRegisterImmediate { imm, rn, rt: R6 }.emit_into(mem)
     }
 
     fn restore_callee_save_registers(mem: &mut JitMemory) -> Result<(), Error> {
         let mut imm = 0;
-        I::LoadRegisterImmediate {
-            imm,
-            rn: SP,
-            rt: R4,
-        }
-        .emit_into(mem)?;
+        let rn = SP;
+        I::LoadRegisterImmediate { imm, rn, rt: R4 }.emit_into(mem)?;
         imm += 4;
-        I::LoadRegisterImmediate {
-            imm,
-            rn: SP,
-            rt: R5,
-        }
-        .emit_into(mem)?;
+        I::LoadRegisterImmediate { imm, rn, rt: R5 }.emit_into(mem)?;
         imm += 4;
-        I::LoadRegisterImmediate {
-            imm,
-            rn: SP,
-            rt: R6,
-        }
-        .emit_into(mem)?;
+        I::LoadRegisterImmediate { imm, rn, rt: R6 }.emit_into(mem)?;
         I::AddImmediateToSP { imm: 12 }.emit_into(mem)?;
 
         I::MoveRegistersSpecial { rm: R4, rd: R8 }.emit_into(mem)?;

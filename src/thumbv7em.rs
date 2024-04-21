@@ -75,7 +75,7 @@ pub enum ThumbInstruction {
     },
     MoveImmediate {
         rd: u8,
-        imm8: u8,
+        imm: u8,
     },
     CompareImmediate {
         rd: u8,
@@ -344,9 +344,9 @@ impl ThumbInstruction {
                 const SUB_OPCODE: u8 = 0b01111;
                 thumb16::Imm3TwoRegsEncoding::new(SUB_OPCODE, *imm3, *rn, *rd).emit(mem)
             }
-            ThumbInstruction::MoveImmediate { rd, imm8 } => {
+            ThumbInstruction::MoveImmediate { rd, imm } => {
                 const MOV_OPCODE: u8 = 0b0100;
-                thumb16::Imm8OneRegEncoding::new(BASIC, MOV_OPCODE, *imm8, *rd).emit(mem)
+                thumb16::Imm8OneRegEncoding::new(BASIC, MOV_OPCODE, *imm, *rd).emit(mem)
             }
             ThumbInstruction::CompareImmediate { rd, imm8 } => {
                 const CPM_OPCODE: u8 = 0b0101;
@@ -505,13 +505,11 @@ impl ThumbInstruction {
                     let u = 0; // Specifies that the offset needs to be subtracted
                     let w = 0; // No writeback
                     let imm = (-1 * imm) as u8;
-                    return thumb32::Immediate8TwoRegistersLongEncoding::new(
-                        STR_OPCODE, *rn, *rt, p, u, w, imm,
-                    )
-                    .emit(mem);
+                    return thumb32::Imm8TwoRegsEncoding::new(STR_OPCODE, *rn, *rt, p, u, w, imm)
+                        .emit(mem);
                 }
 
-                if *imm < (1 << 5) {
+                if *imm < (1 << 5) && *rn < (1 << 3) && *rt < (1 << 3) {
                     // If the immediate fits into 5 bits then we use the simplest encoding
                     const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0110, 4);
                     const STR_OPCODE: u8 = 0b0;
@@ -520,7 +518,7 @@ impl ThumbInstruction {
                     )
                     .emit(mem);
                 }
-                if *imm < (1 << 8) && *rn == SP {
+                if *imm < (1 << 8) && *rn == SP && *rt < (1 << 3) {
                     // If the immediate fits into 8 bits and we load relative to SP we use
                     // the load register SP relative instruction.
                     const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1001, 4);
@@ -530,6 +528,12 @@ impl ThumbInstruction {
                 }
                 if *imm >= (1 << 8) {
                     // Here we use the encoding T4 which allows for 12 bit immediate
+                    // Here we use the encoding T4 which allows for 12 bit immediate
+                    // and higher registers, for now we error here
+                    Err(Error::new(
+                        ErrorKind::Other,
+                        format!("[JIT] Unimplemented instruction encoding."),
+                    ))?;
                 }
                 Ok(())
             }
@@ -538,8 +542,6 @@ impl ThumbInstruction {
                 // size and sign of the immediate operand and also on the base
                 // register where the SP gets special handling which allows for using a 16 bit
                 // instruction.
-                /*
-                 */
                 if *imm > (1 << 12) {
                     Err(Error::new(
                             ErrorKind::Other,
@@ -557,14 +559,14 @@ impl ThumbInstruction {
                     let u = 0; // Specifies that the offset needs to be subtracted
                     let w = 0; // No writeback
                     let imm = (-1 * imm) as u8;
-                    return thumb32::Immediate8TwoRegistersLongEncoding::new(
-                        LDR_OPCODE, *rn, *rt, p, u, w, imm,
-                    )
-                    .emit(mem);
+                    return thumb32::Imm8TwoRegsEncoding::new(LDR_OPCODE, *rn, *rt, p, u, w, imm)
+                        .emit(mem);
                 }
 
-                if *imm < (1 << 5) {
+                if *imm < (1 << 5) && *rn < (1 << 3) && *rt < (1 << 3) {
                     // If the immediate fits into 5 bits then we use the simplest encoding
+                    // Here also both registers need to fit into 3 bits so we can only use
+                    // the lower registers R0-R7 in this encoding.
                     const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0110, 4);
                     const LDR_OPCODE: u8 = 0b1;
                     return thumb16::Imm5TwoRegsEncoding::new(
@@ -572,18 +574,26 @@ impl ThumbInstruction {
                     )
                     .emit(mem);
                 }
-                if *imm < (1 << 8) && *rn == SP {
+                if *imm < (1 << 8) && *rn == SP && *rt < (1 << 3) {
                     // If the immediate fits into 8 bits and we load relative to SP we use
                     // the load register SP relative instruction.
                     const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1001, 4);
-                    const LDR_OPCODE: u8 = 0b1;
+                    const LDR_OPCODE: u8 = 0b1; // Opcode for the SP-relative load
                     return thumb16::Imm8OneRegEncoding::new(OP_A, LDR_OPCODE, *imm as u8, *rt)
                         .emit(mem);
                 }
-                if *imm >= (1 << 8) {
-                    // Here we use the encoding T4 which allows for 12 bit immediate
+                if (1 << 8) <= *imm && *imm < (1 << 12) {
+                    const LDR_OPCODE: u16 = 0b111110001101;
+                    return thumb32::Imm12TwoRegsEncoding::new(LDR_OPCODE, *rn, *rt, *imm as u16)
+                        .emit(mem);
                 }
-                Ok(())
+                Err(Error::new(
+                    ErrorKind::Other,
+                    format!(
+                        "[JIT] Invalid immediate: {:#x} doesn't fit into 12 bits.",
+                        imm
+                    ),
+                ))
             }
             ThumbInstruction::StoreRegisterByteImmediate { imm5, rn, rt } => {
                 const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0111, 4);
