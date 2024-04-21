@@ -64,6 +64,14 @@ const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
         // LD_ABS_* and LD_IND_* operations, so they are not mapped to any eBPF register.
 ];
 
+/// The register used by instructions using immediate operands that don't have
+/// ARM equivalents. For instance ebpf::MUL_IMM instruction multiplies a value in
+/// a given register by an immediate constant, however there is no such instruction
+/// in the Thumb ISA used by the Cortex M, because of this, we need to move the
+/// immediate constant into some register and then use the instruction which operates
+/// on registers. We use this register for that.
+const SPILL_REG: u8 = R4;
+
 // Return the ARMv7-eM register for the given eBPF register
 fn map_register(r: u8) -> u8 {
     assert!(r < REGISTER_MAP_SIZE as u8);
@@ -325,51 +333,71 @@ impl JitCompiler {
                     // guaranteed to not hold any important information.
                     //
                     // Problem: right now we can only move into registers from range R0-R7,
-                    // so we store the value in R4 and hope we didn't overwrite anything
+                    // so we store the value in R4 (SPILL_REG) and hope we didn't overwrite anything
                     // TODO: implement the move instruction for larger encodings
                     // and then use it here to move the immediate into R11
-                    I::MoveImmediate { rd: R4, imm8: insn.imm as u8 }.emit_into(mem)?;
-                    I::MultiplyTwoRegisters { rm: R4, rd: dst }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::MultiplyTwoRegisters { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
                 }
-                ebpf::MUL32_REG | ebpf::MUL64_REG=> todo!(),
-                ebpf::DIV32_IMM | ebpf::DIV64_IMM=> todo!(),
-                ebpf::DIV32_REG | ebpf::DIV64_REG=> todo!(),
-                ebpf::MOD32_IMM | ebpf::MOD64_IMM=> todo!(),
+                ebpf::MUL32_REG | ebpf::MUL64_REG => {
+                    I::MultiplyTwoRegisters { rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::DIV32_IMM | ebpf::DIV64_IMM => todo!(),
+                ebpf::DIV32_REG | ebpf::DIV64_REG => todo!(),
+                ebpf::MOD32_IMM | ebpf::MOD64_IMM => todo!(),
                 ebpf::MOD32_REG | ebpf::MOD64_REG => todo!(),
                 /*{
                     self.emit_muldivmod(mem, insn_ptr as u16, insn.opc, src, dst, insn.imm)
                 }*/
-                ebpf::OR32_IMM | ebpf::OR64_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 1, dst, insn.imm),
-                ebpf::OR32_REG | ebpf::OR64_REG => todo!(), //self.emit_alu32(mem, 0x09, src, dst),
-                ebpf::AND32_IMM | ebpf::AND64_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 4, dst, insn.imm),
-                ebpf::AND32_REG | ebpf::AND64_REG => todo!(), //self.emit_alu32(mem, 0x21, src, dst),
-                ebpf::LSH32_IMM | ebpf::LSH64_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 4, dst, insn.imm as i8),
-                ebpf::LSH32_REG | ebpf::LSH64_REG => todo!(),
-                /*{
-                    self.emit_mov(mem, src, R1);
-                    self.emit_alu32(mem, 0xd3, 4, dst);
-                }*/
-                ebpf::RSH32_IMM | ebpf::RSH64_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 5, dst, insn.imm as i8),
-                ebpf::RSH32_REG | ebpf::RSH64_REG => todo!(),
-                /*{
-                    self.emit_mov(mem, src, R1);
-                    self.emit_alu32(mem, 0xd3, 5, dst);
-                }*/
-                ebpf::NEG32 | ebpf::NEG64 => todo!(), //self.emit_alu32(mem, 0xf7, 3, dst),
-                ebpf::XOR32_IMM | ebpf::XOR64_IMM => todo!(), //self.emit_alu32_imm32(mem, 0x81, 6, dst, insn.imm),
-                ebpf::XOR32_REG | ebpf::XOR64_REG => todo!(), //self.emit_alu32(mem, 0x31, src, dst),
+                ebpf::OR32_IMM | ebpf::OR64_IMM => {
+                    I::MoveImmediate { rd: SPILL_REG, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::LogicalOR { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::OR32_REG | ebpf::OR64_REG => {
+                    I::LogicalOR { rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::AND32_IMM | ebpf::AND64_IMM => {
+                    I::MoveImmediate { rd: SPILL_REG, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::BitwiseAND { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::AND32_REG | ebpf::AND64_REG => {
+                    I::BitwiseAND { rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::LSH32_IMM | ebpf::LSH64_IMM => {
+                    I::LogicalShiftLeftImmediate { imm5: insn.imm as u8, rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::LSH32_REG | ebpf::LSH64_REG => {
+                    I::LogicalShiftLeft { rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::RSH32_IMM | ebpf::RSH64_IMM => {
+                    I::LogicalShiftRightImmediate { imm5: insn.imm as u8, rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::RSH32_REG | ebpf::RSH64_REG => {
+                    I::LogicalShiftRight { rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::NEG32 | ebpf::NEG64 => {
+                    I::BitwiseNOT { rm: dst, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::XOR32_IMM | ebpf::XOR64_IMM => {
+                    I::MoveImmediate { rd: SPILL_REG, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ExclusiveOR  { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::XOR32_REG | ebpf::XOR64_REG => {
+                    I::ExclusiveOR { rm: src, rd: dst }.emit_into(mem)?;
+                }
                 ebpf::MOV32_IMM | ebpf::MOV64_IMM => {
                     Self::verify_immediate_size(insn.imm, 8)?;
                     I::MoveImmediate { rd: dst, imm8: insn.imm as u8}.emit_into(mem)?;
                 }
-                //self.emit_alu32_imm32(mem, 0xc7, 0, dst, insn.imm),
-                ebpf::MOV32_REG | ebpf::MOV64_REG => todo!(), //self.emit_mov(mem, src, dst),
-                ebpf::ARSH32_IMM | ebpf::ARSH64_IMM => todo!(), //self.emit_alu32_imm8(mem, 0xc1, 7, dst, insn.imm as i8),
-                ebpf::ARSH32_REG | ebpf::ARSH64_REG => todo!(),
-                /*{
-                    self.emit_mov(mem, src, R1);
-                    self.emit_alu32(mem, 0xd3, 7, dst);
-                }*/
+                ebpf::MOV32_REG | ebpf::MOV64_REG => {
+                    I::MoveRegistersSpecial { rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::ARSH32_IMM | ebpf::ARSH64_IMM => {
+                    I::ArithmeticShiftRightImmediate { imm5: insn.imm as u8, rm: src, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::ARSH32_REG | ebpf::ARSH64_REG => {
+                    I::ArithmeticShiftRight { rm: SPILL_REG, rd: dst }.emit_into(mem)?;
+                }
                 ebpf::LE => {} // No-op
                 ebpf::BE => todo!(),/*{
                     match insn.imm {
