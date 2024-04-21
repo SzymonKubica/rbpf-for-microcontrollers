@@ -238,7 +238,9 @@ impl JitCompiler {
 
                 // BPF_LDX class
                 ebpf::LD_B_REG => todo!(), //self.emit_load(mem, OperandSize::S8, src, dst, insn.off as i32),
-                ebpf::LD_H_REG => todo!(), //self.emit_load(mem, OperandSize::S16, src, dst, insn.off as i32),
+                ebpf::LD_H_REG => {
+                    I::LoadRegisterHalfwordImmediate { imm: insn.imm, rn: src, rt: dst }.emit_into(mem)?;
+                }
                 ebpf::LD_W_REG => {
                         // TODO: move this verification to the construction of the instruction
                         // encoding to automatically select the correct one based on the

@@ -5,6 +5,25 @@ use stdlib::{Error, ErrorKind, String};
 
 pub const INSTRUCTION_SIZE: u16 = 16;
 
+/// Defines how to encode the opcode of 16-bit Thumb instructions. Instruction is layed out
+/// as follows:
+/// |------|----------|
+/// _^opcode
+#[derive(Debug, Clone, Copy)]
+pub struct Thumb16OpcodeEncoding {
+    pub class_opcode: InstructionClassOpcode,
+    pub opcode: u8,
+}
+
+impl Thumb16OpcodeEncoding {
+    pub const fn new(class_opcode: InstructionClassOpcode, opcode: u8) -> Thumb16OpcodeEncoding {
+        Thumb16OpcodeEncoding {
+            class_opcode,
+            opcode,
+        }
+    }
+}
+
 /// Allows for encoding the instruction using the 16-bit or 32-bit Thumb encoding
 pub trait Emittable {
     fn emit(&self, mem: &mut JitMemory) -> Result<(), Error>;
@@ -32,6 +51,7 @@ pub const COND_BRANCH_AND_SUPERVISOR_CALL: InstructionClassOpcode =
 /// classes have a fixed long opcode that doesn't change between members of the
 /// class, whereasa others e.g. Load/Store single data item don't have a fixed
 /// shared prefix at all.
+#[derive(Debug, Clone, Copy)]
 pub struct InstructionClassOpcode {
     opcode_value: u16,
     opcode_length: u16,

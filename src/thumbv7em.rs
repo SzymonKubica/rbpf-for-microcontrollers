@@ -1,7 +1,8 @@
 use crate::thumb_16bit_encoding::{
-    self as thumb16, Emittable, InstructionClassOpcode, BASIC, DATA_PROCESSING, MISCELLANEOUS,
+    self as thumb16, Emittable, InstructionClassOpcode, Thumb16OpcodeEncoding, BASIC,
+    DATA_PROCESSING, MISCELLANEOUS,
 };
-use crate::thumb_32bit_encoding as thumb32;
+use crate::thumb_32bit_encoding::{self as thumb32, Thumb32OpcodeEncoding};
 use crate::{jit_thumbv7em::emit, JitMemory};
 use log::debug;
 use stdlib::collections::Vec;
@@ -227,22 +228,22 @@ pub enum ThumbInstruction {
         rt: u8,
     },
     StoreRegisterByteImmediate {
-        imm5: u8,
+        imm: i16,
         rn: u8,
         rt: u8,
     },
     LoadRegisterByteImmediate {
-        imm5: u8,
+        imm: i16,
         rn: u8,
         rt: u8,
     },
     StoreRegisterHalfwordImmediate {
-        imm5: u8,
+        imm: i16,
         rn: u8,
         rt: u8,
     },
     LoadRegisterHalfwordImmediate {
-        imm5: u8,
+        imm: i16,
         rn: u8,
         rt: u8,
     },
@@ -488,92 +489,22 @@ impl ThumbInstruction {
                 thumb16::ThreeRegsEncoding::new(OP_A, LDRSH_OPCODE, *rm, *rn, *rt).emit(mem)
             }
             ThumbInstruction::StoreRegisterImmediate { imm, rn, rt } => {
-                if *imm > (1 << 12) {
-                    Err(Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "[JIT] Instruction STR with immediate {:#x} which does not fit into 12 bits.",
-                                imm
-                            ),
-                        ))?;
-                }
-
-                if *imm < 0 && -1 * imm < (1 << 8) {
-                    // Here we use the most complicated T4 to capture the sign of the immediate
-                    const STR_OPCODE: u16 = 0b111110000100;
-                    let p = 1; // Controlls whether we apply the offset when indexing (offset addressing)
-                    let u = 0; // Specifies that the offset needs to be subtracted
-                    let w = 0; // No writeback
-                    let imm = (-1 * imm) as u8;
-                    return thumb32::Imm8TwoRegsEncoding::new(STR_OPCODE, *rn, *rt, p, u, w, imm)
-                        .emit(mem);
-                }
-
-                if *imm < (1 << 5) && *rn < (1 << 3) && *rt < (1 << 3) {
-                    // If the immediate fits into 5 bits then we use the simplest encoding
-                    const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0110, 4);
-                    const STR_OPCODE: u8 = 0b0;
-                    return thumb16::Imm5TwoRegsEncoding::new(
-                        OP_A, STR_OPCODE, *imm as u8, *rn, *rt,
-                    )
-                    .emit(mem);
-                }
+                // Special case when we do the SP relative store
                 if *imm < (1 << 8) && *rn == SP && *rt < (1 << 3) {
                     // If the immediate fits into 8 bits and we load relative to SP we use
                     // the load register SP relative instruction.
                     const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1001, 4);
-                    const STR_OPCODE: u8 = 0b0;
+                    const STR_OPCODE: u8 = 0b0; // Opcode for the SP-relative load
                     return thumb16::Imm8OneRegEncoding::new(OP_A, STR_OPCODE, *imm as u8, *rt)
                         .emit(mem);
                 }
-                if *imm >= (1 << 8) {
-                    // Here we use the encoding T4 which allows for 12 bit immediate
-                    // Here we use the encoding T4 which allows for 12 bit immediate
-                    // and higher registers, for now we error here
-                    Err(Error::new(
-                        ErrorKind::Other,
-                        format!("[JIT] Unimplemented instruction encoding."),
-                    ))?;
-                }
-                Ok(())
+                let opcode_t1 =
+                    Thumb16OpcodeEncoding::new(InstructionClassOpcode::new(0b0110, 4), 0b0);
+                let opcode_t2 = Thumb32OpcodeEncoding::new(0b11, 0b100, 0b0);
+                let opcode_t3 = Thumb32OpcodeEncoding::new(0b11, 0b1100, 0b0);
+                emit_load_store(mem, imm, rn, rt, opcode_t1, opcode_t2, opcode_t3)
             }
             ThumbInstruction::LoadRegisterImmediate { imm, rn, rt } => {
-                // Here we use the most appropriate encoding depending on the
-                // size and sign of the immediate operand and also on the base
-                // register where the SP gets special handling which allows for using a 16 bit
-                // instruction.
-                if *imm > (1 << 12) {
-                    Err(Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "[JIT] Instruction LDR with immediate {:#x} which does not fit into 8 bits.",
-                                imm
-                            ),
-                        ))?;
-                }
-
-                if *imm < 0 && -1 * imm < (1 << 8) {
-                    // Here we use the most complicated T4 to capture the sign of the immediate
-                    const LDR_OPCODE: u16 = 0b111110000101;
-                    let p = 1; // Controlls whether we apply the offset when indexing (offset addressing)
-                    let u = 0; // Specifies that the offset needs to be subtracted
-                    let w = 0; // No writeback
-                    let imm = (-1 * imm) as u8;
-                    return thumb32::Imm8TwoRegsEncoding::new(LDR_OPCODE, *rn, *rt, p, u, w, imm)
-                        .emit(mem);
-                }
-
-                if *imm < (1 << 5) && *rn < (1 << 3) && *rt < (1 << 3) {
-                    // If the immediate fits into 5 bits then we use the simplest encoding
-                    // Here also both registers need to fit into 3 bits so we can only use
-                    // the lower registers R0-R7 in this encoding.
-                    const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0110, 4);
-                    const LDR_OPCODE: u8 = 0b1;
-                    return thumb16::Imm5TwoRegsEncoding::new(
-                        OP_A, LDR_OPCODE, *imm as u8, *rn, *rt,
-                    )
-                    .emit(mem);
-                }
                 if *imm < (1 << 8) && *rn == SP && *rt < (1 << 3) {
                     // If the immediate fits into 8 bits and we load relative to SP we use
                     // the load register SP relative instruction.
@@ -582,53 +513,49 @@ impl ThumbInstruction {
                     return thumb16::Imm8OneRegEncoding::new(OP_A, LDR_OPCODE, *imm as u8, *rt)
                         .emit(mem);
                 }
-                if (1 << 8) <= *imm && *imm < (1 << 12) {
-                    const LDR_OPCODE: u16 = 0b111110001101;
-                    return thumb32::Imm12TwoRegsEncoding::new(LDR_OPCODE, *rn, *rt, *imm as u16)
-                        .emit(mem);
-                }
-                Err(Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "[JIT] Invalid immediate: {:#x} doesn't fit into 12 bits.",
-                        imm
-                    ),
-                ))
+                let opcode_t1 =
+                    Thumb16OpcodeEncoding::new(InstructionClassOpcode::new(0b0110, 4), 0b1);
+                let opcode_t2 = Thumb32OpcodeEncoding::new(0b11, 0b101, 0b0);
+                let opcode_t3 = Thumb32OpcodeEncoding::new(0b11, 0b1101, 0b0);
+                emit_load_store(mem, imm, rn, rt, opcode_t1, opcode_t2, opcode_t3)
             }
-            ThumbInstruction::StoreRegisterByteImmediate { imm5, rn, rt } => {
-                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0111, 4);
-                const STRB_OPCODE: u8 = 0b0;
-                thumb16::Imm5TwoRegsEncoding::new(OP_A, STRB_OPCODE, *imm5, *rn, *rt).emit(mem)
+            ThumbInstruction::StoreRegisterByteImmediate { imm, rn, rt } => {
+                let opcode_t1 =
+                    Thumb16OpcodeEncoding::new(InstructionClassOpcode::new(0b0111, 4), 0b0);
+                let opcode_t2 = Thumb32OpcodeEncoding::new(0b11, 0b0000, 0b0);
+                let opcode_t3 = Thumb32OpcodeEncoding::new(0b11, 0b1000, 0b0);
+                emit_load_store(mem, imm, rn, rt, opcode_t1, opcode_t2, opcode_t3)
             }
-            ThumbInstruction::LoadRegisterByteImmediate { imm5, rn, rt } => {
-                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b0111, 4);
-                const LDRB_OPCODE: u8 = 0b1;
-                thumb16::Imm5TwoRegsEncoding::new(OP_A, LDRB_OPCODE, *imm5, *rn, *rt).emit(mem)
+            ThumbInstruction::LoadRegisterByteImmediate { imm, rn, rt } => {
+                let opcode_t1 =
+                    Thumb16OpcodeEncoding::new(InstructionClassOpcode::new(0b0111, 4), 0b1);
+                let opcode_t2 = Thumb32OpcodeEncoding::new(0b11, 0b0001, 0b0);
+                let opcode_t3 = Thumb32OpcodeEncoding::new(0b11, 0b1001, 0b0);
+                emit_load_store(mem, imm, rn, rt, opcode_t1, opcode_t2, opcode_t3)
             }
-            ThumbInstruction::StoreRegisterHalfwordImmediate { imm5, rn, rt } => {
-                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1000, 4);
-                const STRH_OPCODE: u8 = 0b0;
-                thumb16::Imm5TwoRegsEncoding::new(OP_A, STRH_OPCODE, *imm5, *rn, *rt).emit(mem)
+            ThumbInstruction::StoreRegisterHalfwordImmediate { imm, rn, rt } => {
+                let opcode_t1 =
+                    Thumb16OpcodeEncoding::new(InstructionClassOpcode::new(0b1000, 4), 0b0);
+                let opcode_t2 = Thumb32OpcodeEncoding::new(0b11, 0b0010, 0b0);
+                let opcode_t3 = Thumb32OpcodeEncoding::new(0b11, 0b1010, 0b0);
+                emit_load_store(mem, imm, rn, rt, opcode_t1, opcode_t2, opcode_t3)
             }
-            ThumbInstruction::LoadRegisterHalfwordImmediate { imm5, rn, rt } => {
-                const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1000, 4);
-                const LDRH_OPCODE: u8 = 0b1;
-                thumb16::Imm5TwoRegsEncoding::new(OP_A, LDRH_OPCODE, *imm5, *rn, *rt).emit(mem)
+            ThumbInstruction::LoadRegisterHalfwordImmediate { imm, rn, rt } => {
+                let opcode_t1 =
+                    Thumb16OpcodeEncoding::new(InstructionClassOpcode::new(0b1000, 4), 0b0);
+                let opcode_t2 = Thumb32OpcodeEncoding::new(0b11, 0b0010, 0b0);
+                let opcode_t3 = Thumb32OpcodeEncoding::new(0b11, 0b1010, 0b0);
+                emit_load_store(mem, imm, rn, rt, opcode_t1, opcode_t2, opcode_t3)
             }
             // Miscellaneous 16-bit instructions
-            ThumbInstruction::AddImmediateToSP {
-                imm: immediate_offset,
-            } => {
+            ThumbInstruction::AddImmediateToSP { imm } => {
                 const ADD_OPCODE: u8 = 0b0;
-                thumb16::SPPlusMinusImmediateEncoding::new(ADD_OPCODE, *immediate_offset).emit(mem)
+                thumb16::SPPlusMinusImmediateEncoding::new(ADD_OPCODE, *imm).emit(mem)
             }
 
-            ThumbInstruction::SubtractImmediateFromSP {
-                imm: immediate_offset,
-            } => {
+            ThumbInstruction::SubtractImmediateFromSP { imm } => {
                 const SUBTRACT_OPCODE: u8 = 0b1;
-                thumb16::SPPlusMinusImmediateEncoding::new(SUBTRACT_OPCODE, *immediate_offset)
-                    .emit(mem)
+                thumb16::SPPlusMinusImmediateEncoding::new(SUBTRACT_OPCODE, *imm).emit(mem)
             }
             ThumbInstruction::CompareAndBranchOnZero { i, imm5, rn } => {
                 thumb16::CompareAndBranchEncoding::new(0b0, *i, *imm5, *rn).emit(mem)
@@ -703,4 +630,59 @@ impl ThumbInstruction {
     }
 }
 
-// All instruction classes with their corresponding opcodes defined
+/// Encodes load/store immediate instruction appropriately depending on the size
+/// of the immediate operand and register numbers. It needs to take in the three
+/// opcodes that are used for the three possible variants of the emitted instruction:
+/// - T1: 5-bit unsigned immediate and two 3-bit registers -> 16 bit encoding
+/// - T2: 8-bit immediate (possibly negative) and two 4-bit registers -> 32 bit encoding
+/// - T3: 12-bit immediate and two 4-bit registers -> 32 bit encoding
+fn emit_load_store(
+    mem: &mut JitMemory,
+    imm: &i16,
+    rn: &u8,
+    rt: &u8,
+    opcode_t1: Thumb16OpcodeEncoding,
+    opcode_t2: Thumb32OpcodeEncoding,
+    opcode_t3: Thumb32OpcodeEncoding,
+) -> Result<(), Error> {
+    if imm.abs() > (1 << 12) {
+        Err(Error::new(
+            ErrorKind::Other,
+            format!(
+                "[JIT] Instruction STR with immediate {:#x} which does not fit into 12 bits.",
+                imm
+            ),
+        ))?;
+    }
+
+    // T2: 8-bit immediate (possibly negative) and two 4-bit registers -> 32 bit encoding
+    if *imm < 0 && -1 * imm < (1 << 8) {
+        let p = 1; // Controlls whether we apply the offset when indexing (offset addressing)
+        let u = 0; // Specifies that the offset needs to be subtracted
+        let w = 0; // No writeback
+        let imm = (-1 * imm) as u8;
+        return thumb32::Imm8TwoRegsEncoding::new(opcode_t2, *rn, *rt, p, u, w, imm).emit(mem);
+    }
+
+    // T1: 5-bit unsigned immediate and two 3-bit registers -> 16 bit encoding
+    if *imm < (1 << 5) && *rn < (1 << 3) && *rt < (1 << 3) {
+        return thumb16::Imm5TwoRegsEncoding::new(
+            opcode_t1.class_opcode,
+            opcode_t1.opcode,
+            *imm as u8,
+            *rn,
+            *rt,
+        )
+        .emit(mem);
+    }
+
+    // T3: 12-bit immediate and two 4-bit registers -> 32 bit encoding
+    if (1 << 8) <= *imm && *imm < (1 << 12) {
+        return thumb32::Imm12TwoRegsEncoding::new(opcode_t3, *rn, *rt, *imm as u16).emit(mem);
+    }
+
+    Err(Error::new(
+        ErrorKind::Other,
+        format!("[JIT] Invalid immediate: {:#x}.", imm),
+    ))
+}

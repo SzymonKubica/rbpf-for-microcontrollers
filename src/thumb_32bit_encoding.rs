@@ -4,19 +4,20 @@ use log::debug;
 use stdlib::collections::Vec;
 use stdlib::{Error, ErrorKind, String};
 
-/// Base way of encoding 32-bit Thumb instructions. Instruction is layed out
-/// as follows:
-/// 111|__|_______|____|_|______________|
-///     ^op1   ^op2     ^op
-struct Thumb32BaseOpcodeEncoding {
+/// Defines how to encode the opcode of 32-bit Thumb instructions.
+/// Instruction is laid out as follows:
+/// 111|--|-------|----|-|--------------|
+/// ___ ^op1___^op2_____^op
+#[derive(Debug, Clone, Copy)]
+pub struct Thumb32OpcodeEncoding {
     op1: u8,
     op2: u8,
     op: u8,
 }
 
-impl Thumb32BaseOpcodeEncoding {
-    pub const fn new(op1: u8, op2: u8, op: u8) -> Thumb32BaseOpcodeEncoding {
-        Thumb32BaseOpcodeEncoding {
+impl Thumb32OpcodeEncoding {
+    pub const fn new(op1: u8, op2: u8, op: u8) -> Thumb32OpcodeEncoding {
+        Thumb32OpcodeEncoding {
             op1,
             op2,
             op,
@@ -24,27 +25,38 @@ impl Thumb32BaseOpcodeEncoding {
     }
 }
 
-type Opcode = Thumb32BaseOpcodeEncoding;
+type Opcode = Thumb32OpcodeEncoding;
 
 
-impl Thumb32BaseOpcodeEncoding {
-    pub fn apply(&self, encoding: &mut u32) {
-        *encoding |= 0b111 << 29;
-        *encoding |= (self.op1 as u32 & 0b11) << 27;
-        *encoding |= (self.op2 as u32 & 0b1111111) << 20;
-        *encoding |= (self.op as u32 & 0b1) << 14;
+impl Into<u32> for Thumb32OpcodeEncoding {
+    fn into(self) -> u32 {
+        // We turn the encoding into a mask that is compatible with the Little
+        // Endian encoding used in the other implemntations of the Emittable trait.
+        // The way it works is that the most significant word of the instruction
+        // is written in the lower bits and the lowest 16 bits of the actual
+        // encoding are written into the 16 most significant bits. That way,
+        // the opcode can be 'encrusted' into the generated encoding by simply
+        // using |= (as it already has the words reordered properly)
+        let mut encoding = 0;
+        // first encode the lower word
+        encoding |= (self.op as u32 & 0b1) << 15;
+        encoding <<= 16; // We now shift the lower bits and write the higher bits
+        encoding |= 0b111 << 13; // Indicates that we have a 32-bit instruction
+        encoding |= (self.op1 as u32 & 0b11) << 11;
+        encoding |= (self.op2 as u32 & 0b1111111) << 4;
+        encoding
     }
 }
 
 pub struct Imm12TwoRegsEncoding {
-    opcode: u16,
+    opcode: Thumb32OpcodeEncoding,
     rn: u8,
     rt: u8,
     imm12: u16,
 }
 
 impl Imm12TwoRegsEncoding {
-    pub fn new(opcode: u16, rn: u8, rt: u8, imm12: u16) -> Imm12TwoRegsEncoding {
+    pub fn new(opcode: Opcode, rn: u8, rt: u8, imm12: u16) -> Imm12TwoRegsEncoding {
         Imm12TwoRegsEncoding {
             opcode,
             rn,
@@ -59,11 +71,16 @@ impl Emittable for Imm12TwoRegsEncoding {
         let mut encoding = 0;
         // Because of the endianness of the machine (we are in Little Endian)
         // we need to encode the two words in reverse order.
+
+        // We first write the operands
         encoding |= (self.rt as u32 & 0b1111) << 12;
         encoding |= self.imm12 as u32 & 0b111111111111;
         encoding <<= 16;
-        encoding |= (self.opcode as u32) << 4;
         encoding |= self.rn as u32 & 0b1111;
+
+        // Now we get the encoded opcode and stamp it on top of the instruction
+        let opcode_encoding: u32 = self.opcode.into();
+        encoding |= opcode_encoding;
         emit::<u32>(mem, encoding);
         Ok(())
     }
@@ -72,7 +89,7 @@ impl Emittable for Imm12TwoRegsEncoding {
 
 /// 32-bit Thumb encoding for instructions that have two registers
 pub struct Imm8TwoRegsEncoding {
-    opcode: u16,
+    opcode: Thumb32OpcodeEncoding,
     rn: u8,
     rt: u8,
     p: u8,
@@ -82,7 +99,7 @@ pub struct Imm8TwoRegsEncoding {
 }
 
 impl Imm8TwoRegsEncoding {
-    pub fn new(opcode: u16, rn: u8, rt: u8, p: u8, u: u8, w: u8, imm8: u8) -> Imm8TwoRegsEncoding {
+    pub fn new(opcode: Thumb32OpcodeEncoding, rn: u8, rt: u8, p: u8, u: u8, w: u8, imm8: u8) -> Imm8TwoRegsEncoding {
         Imm8TwoRegsEncoding {
             opcode,
             rn,
@@ -108,8 +125,11 @@ impl Emittable for Imm8TwoRegsEncoding {
         encoding |= self.imm8 as u32 & 0b11111111;
 
         encoding <<= 16;
-        encoding |= (self.opcode as u32) << 4;
         encoding |= self.rn as u32 & 0b1111;
+
+        // We now get the encoded opcode and stamp it on top of the instruction
+        let opcode_encoding: u32 = self.opcode.into();
+        encoding |= opcode_encoding;
         emit::<u32>(mem, encoding);
         Ok(())
     }
