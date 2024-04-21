@@ -30,6 +30,40 @@ pub const ARGUMENT_REGISTERS: [u8; 4] = [R0, R1, R2, R3];
 
 pub const CALLEE_SAVED_REGISTERS: [u8; 7] = [R4, R5, R6, R7, R8, R10, R11];
 
+#[derive(Debug, Clone, Copy)]
+pub enum Condition {
+    /// Equal
+    EQ = 0b0000,
+    /// Not equal
+    NE = 0b0001,
+    /// Carry set
+    CS = 0b0010,
+    /// Carry clear
+    CC = 0b0011,
+    /// Negative
+    MI = 0b0100,
+    /// Positive or zero
+    PL = 0b0101,
+    /// Overflow
+    VS = 0b0110,
+    /// No overflow
+    VC = 0b0111,
+    /// Unsigned higher
+    HI = 0b1000,
+    /// Unsigned lower or same
+    LS = 0b1001,
+    /// Signed greater than or equal
+    GE = 0b1010,
+    /// Signed less than
+    LT = 0b1011,
+    /// Signed greater than
+    GT = 0b1100,
+    /// Signed less than or equal
+    LE = 0b1101,
+    /// Always (unconditional)
+    AL = 0b1110,
+}
+
 /// The 16b Thumb instructions subset of the ARMv7-M ISA. They are taken directly
 /// from the ARMv7-M Architecture Reference Manual without renaming / abstracting
 /// out common patterns to allow for easier debugging and consulting the docs.
@@ -307,8 +341,8 @@ pub enum ThumbInstruction {
     // SendEventHint,
     // Conditional branch and supervisor call
     ConditionalBranch {
-        cond: u8,
-        imm8: u8,
+        cond: Condition,
+        imm: i32,
     },
     //SupervisorCall,
 }
@@ -543,8 +577,8 @@ impl ThumbInstruction {
             ThumbInstruction::LoadRegisterHalfwordImmediate { imm, rn, rt } => {
                 let opcode_t1 =
                     Thumb16OpcodeEncoding::new(InstructionClassOpcode::new(0b1000, 4), 0b0);
-                let opcode_t2 = Thumb32OpcodeEncoding::new(0b11, 0b0010, 0b0);
-                let opcode_t3 = Thumb32OpcodeEncoding::new(0b11, 0b1010, 0b0);
+                let opcode_t2 = Thumb32OpcodeEncoding::new(0b11, 0b0011, 0b0);
+                let opcode_t3 = Thumb32OpcodeEncoding::new(0b11, 0b1011, 0b0);
                 emit_load_store(mem, imm, rn, rt, opcode_t1, opcode_t2, opcode_t3)
             }
             // Miscellaneous 16-bit instructions
@@ -623,8 +657,8 @@ impl ThumbInstruction {
             //ThumbInstruction::WaitForInterruptHint => todo!(),
             //ThumbInstruction::SendEventHint => todo!(),
             //ThumbInstruction::SupervisorCall => todo!(),
-            ThumbInstruction::ConditionalBranch { cond, imm8 } => {
-                thumb16::ConditionalBranchEncoding::new(*cond, *imm8).emit(mem)
+            ThumbInstruction::ConditionalBranch { cond, imm } => {
+                thumb16::ConditionalBranchEncoding::new(*cond, *imm).emit(mem)
             }
         }
     }

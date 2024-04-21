@@ -1,3 +1,4 @@
+use crate::thumbv7em::Condition;
 use crate::{jit_thumbv7em::emit, JitMemory};
 use log::debug;
 use stdlib::collections::Vec;
@@ -71,7 +72,6 @@ impl InstructionClassOpcode {
         *encoding |= self.opcode_value << (INSTRUCTION_SIZE - self.opcode_length);
     }
 }
-
 
 pub struct PushPopEncoding {
     /// The shared prefix common for all members of the class
@@ -465,28 +465,36 @@ impl Emittable for CompareAndBranchEncoding {
 
 pub struct ConditionalBranchEncoding {
     class_opcode: InstructionClassOpcode,
-    cond: u8,
-    imm8: u8,
+    cond: Condition,
+    imm: i32,
 }
 
 impl ConditionalBranchEncoding {
-    pub fn new(cond: u8, imm8: u8) -> ConditionalBranchEncoding {
+    pub fn new(cond: Condition, imm: i32) -> ConditionalBranchEncoding {
         ConditionalBranchEncoding {
             class_opcode: COND_BRANCH_AND_SUPERVISOR_CALL,
             cond,
-            imm8,
+            imm,
         }
     }
 }
 
 impl Emittable for ConditionalBranchEncoding {
     fn emit(&self, mem: &mut JitMemory) -> Result<(), Error> {
-        let mut encoding = 0;
-        self.class_opcode.apply(&mut encoding);
-        encoding |= (self.cond as u16 & 0b1111) << 8;
-        encoding |= self.imm8 as u16 & 0b11111111;
-        emit::<u16>(mem, encoding);
-        Ok(())
+        if -256 < self.imm && self.imm < 254 && self.imm % 2 == 0 {
+            // The immediate fits into the encoding T1
+            let mut encoding = 0;
+            self.class_opcode.apply(&mut encoding);
+            encoding |= (self.cond as u16 & 0b1111) << 8;
+            // We need to cast as i8 to preserve sign.
+            debug!("imm: {}", self.imm);
+            // We need to use two's complement encoding here
+            encoding |= (self.imm as u8) as u16;
+            emit::<u16>(mem, encoding);
+            Ok(())
+        } else {
+            let mut encoding = 0;
+            Ok(())
+        }
     }
 }
-

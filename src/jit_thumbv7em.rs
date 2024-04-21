@@ -412,7 +412,11 @@ impl JitCompiler {
                 }*/
                 // BPF_JMP class
                 ebpf::JA => todo!(), //self.emit_jmp(mem, target_pc),
-                ebpf::JEQ_IMM => todo!(),
+                ebpf::JEQ_IMM => {
+                    //`jeq dst, imm, +off` /// `PC += off if dst == imm`.
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
+                }
                 /*{
                     self.emit_cmp_imm32(mem, dst, insn.imm);
                     self.emit_jcc(mem, 0x84, target_pc);
@@ -900,6 +904,8 @@ impl<'a> std::fmt::Debug for JitMemory<'a> {
 fn error_32_bit_arch() -> Result<(), Error> {
     Err(Error::new(
         ErrorKind::Other,
-        format!("[JIT] Attempted to compile a 64-bit instruction on a 32-bit ARMv7-eM architecture."),
+        format!(
+            "[JIT] Attempted to compile a 64-bit instruction on a 32-bit ARMv7-eM architecture."
+        ),
     ))
 }
