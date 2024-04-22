@@ -1,4 +1,4 @@
-use crate::thumbv7em::Condition;
+use crate::thumbv7em::{Condition, ThumbInstruction};
 use crate::{jit_thumbv7em::emit, JitMemory};
 use log::debug;
 use stdlib::collections::Vec;
@@ -481,20 +481,77 @@ impl ConditionalBranchEncoding {
 
 impl Emittable for ConditionalBranchEncoding {
     fn emit(&self, mem: &mut JitMemory) -> Result<(), Error> {
-        if -256 < self.imm && self.imm < 254 && self.imm % 2 == 0 {
+        // Note: the concitional branch (B) Thumb instruction only allows for
+        // jumps that are multiples of 2. Because of this, if the llvm compiler
+        // produces bytecode that tells us to jump by say '1' PC-relative,
+        // we need to fix things and introduce a no-op instruction that would
+        // make the jump a multiple of 2. The proposed workflow is as follows:
+        //
+        // 1. The jump offset is positive (forward jump) and odd:
+        //    - a no-op instruction is inserted after the jump jump instrution
+        //      to make the required offset even (by increasing it by 1)
+        // 1. The jump offset is negative (forward jump) and odd
+        //    - a no-op instruction is inserted before the jump instruction
+        //      to make the required offset even (by decreasing it by 1 (making its absolute value
+        //      larger -> longer jump))
+
+        // The immediate is made even and divided by two as the instruction immediate
+        // is extended by 0 on the right when decoded by the CPU.
+        let imm = if self.imm % 2 != 0 {
+            let sign = if self.imm > 0 { 1 } else { -1 };
+            sign * (self.imm.abs() + 1) / 2 // We increase the jump length by making it 1 step longer
+        } else {
+            self.imm / 2
+        };
+
+        // Get the right encoding depending on the size of the immediate offset.
+        let encoding = if -128 < imm && imm < 127 {
             // The immediate fits into the encoding T1
             let mut encoding = 0;
             self.class_opcode.apply(&mut encoding);
             encoding |= (self.cond as u16 & 0b1111) << 8;
             // We need to cast as i8 to preserve sign.
-            debug!("imm: {}", self.imm);
-            // We need to use two's complement encoding here
-            encoding |= (self.imm as u8) as u16;
-            emit::<u16>(mem, encoding);
-            Ok(())
+            debug!("imm: {}", imm);
+            encoding |= (imm as u8) as u16;
+            encoding
         } else {
-            let mut encoding = 0;
-            Ok(())
+            0
+        };
+
+        if self.imm % 2 != 0 {
+            if self.imm > 0 {
+                // Immediate positive => forward jump => no-op inserted after the branch
+                emit::<u16>(mem, encoding);
+                ThumbInstruction::NoOperationHint.emit_into(mem)?;
+            } else {
+                // Immediate negative => backward jump => no-op inserted before the branch
+                ThumbInstruction::NoOperationHint.emit_into(mem)?;
+                emit::<u16>(mem, encoding);
+            }
         }
+
+        Ok(())
+    }
+}
+
+pub struct HintEncoding {
+    pub op_a: u8,
+    pub op_b: u8,
+}
+
+impl HintEncoding {
+    pub fn new(op_a: u8, op_b: u8) -> HintEncoding {
+        HintEncoding { op_a, op_b }
+    }
+}
+
+impl Emittable for HintEncoding {
+    fn emit(&self, mem: &mut JitMemory) -> Result<(), Error> {
+        let mut encoding = 0;
+        IF_THEN_AND_HINTS.apply(&mut encoding);
+        encoding |= (self.op_a as u16 & 0b1111) << 8;
+        encoding |= self.op_b as u16;
+        emit::<u16>(mem, encoding);
+        Ok(())
     }
 }

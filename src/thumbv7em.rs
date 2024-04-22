@@ -334,7 +334,7 @@ pub enum ThumbInstruction {
     },
     // If-Then and hints (not useful for now)
     // IfThen,
-    // NoOperationHint,
+    NoOperationHint,
     // YieldHint,
     // WaitForEventHint,
     // WaitForInterruptHint,
@@ -651,7 +651,6 @@ impl ThumbInstruction {
             }
             //ThumbInstruction::Breakpoint => todo!(),
             //ThumbInstruction::IfThen => todo!(),
-            //ThumbInstruction::NoOperationHint => todo!(),
             //ThumbInstruction::YieldHint => todo!(),
             //ThumbInstruction::WaitForEventHint => todo!(),
             //ThumbInstruction::WaitForInterruptHint => todo!(),
@@ -659,6 +658,9 @@ impl ThumbInstruction {
             //ThumbInstruction::SupervisorCall => todo!(),
             ThumbInstruction::ConditionalBranch { cond, imm } => {
                 thumb16::ConditionalBranchEncoding::new(*cond, *imm).emit(mem)
+            }
+            ThumbInstruction::NoOperationHint => {
+                thumb16::HintEncoding::new(0b0, 0b0).emit(mem)
             }
         }
     }
