@@ -17,16 +17,11 @@ pub struct Thumb32OpcodeEncoding {
 
 impl Thumb32OpcodeEncoding {
     pub const fn new(op1: u8, op2: u8, op: u8) -> Thumb32OpcodeEncoding {
-        Thumb32OpcodeEncoding {
-            op1,
-            op2,
-            op,
-        }
+        Thumb32OpcodeEncoding { op1, op2, op }
     }
 }
 
 type Opcode = Thumb32OpcodeEncoding;
-
 
 impl Into<u32> for Thumb32OpcodeEncoding {
     fn into(self) -> u32 {
@@ -86,7 +81,6 @@ impl Emittable for Imm12TwoRegsEncoding {
     }
 }
 
-
 /// 32-bit Thumb encoding for instructions that have two registers
 pub struct Imm8TwoRegsEncoding {
     opcode: Thumb32OpcodeEncoding,
@@ -99,7 +93,15 @@ pub struct Imm8TwoRegsEncoding {
 }
 
 impl Imm8TwoRegsEncoding {
-    pub fn new(opcode: Thumb32OpcodeEncoding, rn: u8, rt: u8, p: u8, u: u8, w: u8, imm8: u8) -> Imm8TwoRegsEncoding {
+    pub fn new(
+        opcode: Thumb32OpcodeEncoding,
+        rn: u8,
+        rt: u8,
+        p: u8,
+        u: u8,
+        w: u8,
+        imm8: u8,
+    ) -> Imm8TwoRegsEncoding {
         Imm8TwoRegsEncoding {
             opcode,
             rn,
@@ -134,5 +136,3 @@ impl Emittable for Imm8TwoRegsEncoding {
         Ok(())
     }
 }
-
-

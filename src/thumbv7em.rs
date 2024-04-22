@@ -165,7 +165,7 @@ pub enum ThumbInstruction {
         rm: u8,
         rd: u8,
     },
-    Compare {
+    CompareRegisters {
         rm: u8,
         rd: u8,
     },
@@ -194,9 +194,10 @@ pub enum ThumbInstruction {
         rm: u8,
         rd: u8,
     },
-    CompareRegistersSpecial {
+    CompareRegistersShift {
         rm: u8,
         rd: u8,
+        shift: u8,
     },
     MoveRegistersSpecial {
         rm: u8,
@@ -436,9 +437,18 @@ impl ThumbInstruction {
                 const RSB_OPCODE: u8 = 0b1001;
                 thumb16::TwoRegsEncoding::new(DATA_PROCESSING, RSB_OPCODE, *rm, *rd).emit(mem)
             }
-            ThumbInstruction::Compare { rm, rd } => {
-                const CMP_OPCODE: u8 = 0b1010;
-                thumb16::TwoRegsEncoding::new(DATA_PROCESSING, CMP_OPCODE, *rm, *rd).emit(mem)
+            ThumbInstruction::CompareRegisters { rm, rd } => {
+                // We use an appropriate encoding depending on the size of
+                // registers.
+                if *rm < (1 << 3) && *rd < (1 << 3) {
+                    const CMP_OPCODE: u8 = 0b1010;
+                    return thumb16::TwoRegsEncoding::new(DATA_PROCESSING, CMP_OPCODE, *rm, *rd)
+                        .emit(mem);
+                } else {
+                    const CMP_OPCODE: u8 = 0b01;
+                    return thumb16::TwoRegistersSpecialEncoding::new(CMP_OPCODE, *rm, *rd)
+                        .emit(mem);
+                }
             }
             ThumbInstruction::CompareNegative { rm, rd } => {
                 const CMN_OPCODE: u8 = 0b1011;
@@ -464,10 +474,6 @@ impl ThumbInstruction {
             ThumbInstruction::AddRegistersSpecial { rm, rd } => {
                 const ADD_OPCODE: u8 = 0b00;
                 thumb16::TwoRegistersSpecialEncoding::new(ADD_OPCODE, *rm, *rd).emit(mem)
-            }
-            ThumbInstruction::CompareRegistersSpecial { rm, rd } => {
-                const CMP_OPCODE: u8 = 0b01;
-                thumb16::TwoRegistersSpecialEncoding::new(CMP_OPCODE, *rm, *rd).emit(mem)
             }
             ThumbInstruction::MoveRegistersSpecial { rm, rd } => {
                 const MOV_OPCODE: u8 = 0b10;
@@ -659,9 +665,8 @@ impl ThumbInstruction {
             ThumbInstruction::ConditionalBranch { cond, imm } => {
                 thumb16::ConditionalBranchEncoding::new(*cond, *imm).emit(mem)
             }
-            ThumbInstruction::NoOperationHint => {
-                thumb16::HintEncoding::new(0b0, 0b0).emit(mem)
-            }
+            ThumbInstruction::NoOperationHint => thumb16::HintEncoding::new(0b0, 0b0).emit(mem),
+            ThumbInstruction::CompareRegistersShift { rm, rd, shift } => todo!(),
         }
     }
 }

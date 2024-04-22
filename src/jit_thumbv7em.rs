@@ -410,234 +410,100 @@ impl JitCompiler {
                         _ => unreachable!(), // Should have been caught by verifier
                     }
                 }*/
-                // BPF_JMP class
+                // BPF_JMP and BPF_JMP32 class (because we can only handle 32 bit
+                // values in the registers) the behaviour of both classes is the same.
                 ebpf::JA => todo!(), //self.emit_jmp(mem, target_pc),
-                ebpf::JEQ_IMM => {
-                    //`jeq dst, imm, +off` /// `PC += off if dst == imm`.
+                ebpf::JEQ_IMM | ebpf::JEQ_IMM32 => {
                     I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
                 }
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x84, target_pc);
-                }*/
-                ebpf::JEQ_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x84, target_pc);
-                }*/
-                ebpf::JGT_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x87, target_pc);
-                }*/
-                ebpf::JGT_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x87, target_pc);
-                }*/
-                ebpf::JGE_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x83, target_pc);
-                }*/
-                ebpf::JGE_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x83, target_pc);
-                }*/
-                ebpf::JLT_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x82, target_pc);
-                }*/
-                ebpf::JLT_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x82, target_pc);
-                }*/
-                ebpf::JLE_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x86, target_pc);
-                }*/
-                ebpf::JLE_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x86, target_pc);
-                }*/
-                ebpf::JSET_IMM => todo!(),
-                /*{
-                    self.emit_alu64_imm32(mem, 0xf7, 0, dst, insn.imm);
-                    self.emit_jcc(mem, 0x85, target_pc);
-                }*/
-                ebpf::JSET_REG => todo!(),
+                ebpf::JEQ_REG | ebpf::JEQ_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JGT_IMM | ebpf::JGT_IMM32 => {
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JGT_REG | ebpf::JGT_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JGE_IMM | ebpf::JGE_IMM32 => {
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JGE_REG | ebpf::JGE_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JLT_IMM | ebpf::JLT_IMM32 => {
+                    // Note: JLT wants to use an unsigned comparison but our LT is signed -> how to
+                    // get around this? Can we repurpose the Condition::HI and reordering operands?
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JLT_REG | ebpf::JLT_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JLE_IMM | ebpf::JLE_IMM32 => {
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JLE_REG | ebpf::JLE_REG32 => todo!(),
+                ebpf::JSET_IMM | ebpf::JSET_IMM32 => {
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::CS, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSET_REG | ebpf::JSET_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
+                }
                 /*{
                     self.emit_alu64(mem, 0x85, src, dst);
                     self.emit_jcc(mem, 0x85, target_pc);
                 }*/
-                ebpf::JNE_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x85, target_pc);
-                }*/
-                ebpf::JNE_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x85, target_pc);
-                }*/
-                ebpf::JSGT_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x8f, target_pc);
-                }*/
-                ebpf::JSGT_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x8f, target_pc);
-                }*/
-                ebpf::JSGE_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x8d, target_pc);
-                }*/
-                ebpf::JSGE_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x8d, target_pc);
-                }*/
-                ebpf::JSLT_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x8c, target_pc);
-                }*/
-                ebpf::JSLT_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x8c, target_pc);
-                }*/
-                ebpf::JSLE_IMM => todo!(),
-                /*{
-                    self.emit_cmp_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x8e, target_pc);
-                }*/
-                ebpf::JSLE_REG => todo!(),
-                /*{
-                    self.emit_cmp(mem, src, dst);
-                    self.emit_jcc(mem, 0x8e, target_pc);
-                }*/
-
-                // BPF_JMP32 class
-                ebpf::JEQ_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x84, target_pc);
-                }*/
-                ebpf::JEQ_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x84, target_pc);
-                }*/
-                ebpf::JGT_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x87, target_pc);
-                }*/
-                ebpf::JGT_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x87, target_pc);
-                }*/
-                ebpf::JGE_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x83, target_pc);
-                }*/
-                ebpf::JGE_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x83, target_pc);
-                }*/
-                ebpf::JLT_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x82, target_pc);
-                }*/
-                ebpf::JLT_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x82, target_pc);
-                }*/
-                ebpf::JLE_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x86, target_pc);
-                }*/
-                ebpf::JLE_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x86, target_pc);
-                }*/
-                ebpf::JSET_IMM32 => todo!(),
-                /*{
-                    self.emit_alu32_imm32(mem, 0xf7, 0, dst, insn.imm);
-                    self.emit_jcc(mem, 0x85, target_pc);
-                }*/
-                ebpf::JSET_REG32 => todo!(),
-                /*{
-                    self.emit_alu32(mem, 0x85, src, dst);
-                    self.emit_jcc(mem, 0x85, target_pc);
-                }*/
-                ebpf::JNE_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x85, target_pc);
-                }*/
-                ebpf::JNE_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x85, target_pc);
-                }*/
-                ebpf::JSGT_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x8f, target_pc);
-                }*/
-                ebpf::JSGT_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x8f, target_pc);
-                }*/
-                ebpf::JSGE_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x8d, target_pc);
-                }*/
-                ebpf::JSGE_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x8d, target_pc);
-                }*/
-                ebpf::JSLT_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x8c, target_pc);
-                }*/
-                ebpf::JSLT_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x8c, target_pc);
-                }*/
-                ebpf::JSLE_IMM32 => todo!(),
-                /*{
-                    self.emit_cmp32_imm32(mem, dst, insn.imm);
-                    self.emit_jcc(mem, 0x8e, target_pc);
-                }*/
-                ebpf::JSLE_REG32 => todo!(),
-                /*{
-                    self.emit_cmp32(mem, src, dst);
-                    self.emit_jcc(mem, 0x8e, target_pc);
-                }*/
+                ebpf::JNE_IMM | ebpf::JNE_IMM32 => {
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::NE, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JNE_REG | ebpf::JNE_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::NE, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSGT_IMM | ebpf::JSGT_IMM32 =>{
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSGT_REG | ebpf::JSGT_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSGE_IMM | ebpf::JSGE_IMM32 => {
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSGE_REG | ebpf::JSGE_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSLT_IMM | ebpf::JSLT_IMM32 => {
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSLT_REG | ebpf::JSLT_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSLE_IMM | ebpf::JSLE_IMM32 => {
+                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+                ebpf::JSLE_REG | ebpf::JSLE_REG32 =>{
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
+                }
 
                 ebpf::CALL => todo!(), /*{
                     // For JIT, helpers in use MUST be registered at compile time. They can be
@@ -694,11 +560,6 @@ impl JitCompiler {
         let offset = ebpf::STACK_SIZE as u16 / 2;
         I::AddImmediateToSP { imm: offset }.emit_into(mem)?;
         I::AddImmediateToSP { imm: offset }.emit_into(mem)?;
-
-        //I::MoveImmediate { rd: R0, imm8: 123 }.emit_into(mem);
-
-        // Here we test if we can return back the third argument
-        //I::MoveRegistersSpecial { rm: R10, rd: R0 }.emit_into(mem);
 
         Self::restore_callee_save_registers(mem)?;
 
