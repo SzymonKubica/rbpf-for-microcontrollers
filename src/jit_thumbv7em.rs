@@ -243,24 +243,27 @@ impl JitCompiler {
                 ebpf::LD_DW_REG => error_32_bit_arch()?,
                 // BPF_ST class
                 ebpf::ST_B_IMM => {
+                    // The ARM ISA does not support storing immediates into memory
+                    // We need to load it into a spill register instead and then store it.
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
+                    I::StoreRegisterByteImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?
 
                 }
-                /*{
-                    self.emit_store_imm32(mem, OperandSize::S8, dst, insn.off as i32, insn.imm)
-                }*/
-                ebpf::ST_H_IMM => todo!(),
-                /*{
-                    self.emit_store_imm32(mem, OperandSize::S16, dst, insn.off as i32, insn.imm)
-                }*/
-                ebpf::ST_W_IMM => todo!(),
-                /*{
-                    self.emit_store_imm32(mem, OperandSize::S32, dst, insn.off as i32, insn.imm)
-                }*/
-                ebpf::ST_DW_IMM => todo!(),
-                /*{
-                    self.emit_store_imm32(mem, OperandSize::S64, dst, insn.off as i32, insn.imm)
-                }*/
+                ebpf::ST_H_IMM =>  {
+                    // The ARM ISA does not support storing immediates into memory
+                    // We need to load it into a spill register instead and then store it.
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
+                    I::StoreRegisterHalfwordImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?
 
+                }
+                ebpf::ST_W_IMM => {
+                    // The ARM ISA does not support storing immediates into memory
+                    // We need to load it into a spill register instead and then store it.
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
+                    I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?
+
+                }
+                ebpf::ST_DW_IMM =>  error_32_bit_arch()?,
                 // BPF_STX class
                 ebpf::ST_B_REG => I::StoreRegisterByteImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
                 ebpf::ST_H_REG => I::StoreRegisterHalfwordImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
@@ -325,7 +328,7 @@ impl JitCompiler {
                     // so we store the value in R4 (SPILL_REG) and hope we didn't overwrite anything
                     // TODO: implement the move instruction for larger encodings
                     // and then use it here to move the immediate into R11
-                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm as u8 }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::MultiplyTwoRegisters { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::MUL32_REG | ebpf::MUL64_REG => {
@@ -339,14 +342,14 @@ impl JitCompiler {
                     self.emit_muldivmod(mem, insn_ptr as u16, insn.opc, src, dst, insn.imm)
                 }*/
                 ebpf::OR32_IMM | ebpf::OR64_IMM => {
-                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm as u8 }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::LogicalOR { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::OR32_REG | ebpf::OR64_REG => {
                     I::LogicalOR { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::AND32_IMM | ebpf::AND64_IMM => {
-                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm as u8 }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::BitwiseAND { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::AND32_REG | ebpf::AND64_REG => {
@@ -368,15 +371,14 @@ impl JitCompiler {
                     I::BitwiseNOT { rm: dst, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::XOR32_IMM | ebpf::XOR64_IMM => {
-                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm as u8 }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::ExclusiveOR  { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::XOR32_REG | ebpf::XOR64_REG => {
                     I::ExclusiveOR { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::MOV32_IMM | ebpf::MOV64_IMM => {
-                    Self::verify_immediate_size(insn.imm, 8)?;
-                    I::MoveImmediate { rd: dst, imm: insn.imm as u8}.emit_into(mem)?;
+                    I::MoveImmediate { rd: dst, imm: insn.imm}.emit_into(mem)?;
                 }
                 ebpf::MOV32_REG | ebpf::MOV64_REG => {
                     I::MoveRegistersSpecial { rm: src, rd: dst }.emit_into(mem)?;
@@ -414,7 +416,7 @@ impl JitCompiler {
                 // values in the registers) the behaviour of both classes is the same.
                 ebpf::JA => todo!(), //self.emit_jmp(mem, target_pc),
                 ebpf::JEQ_IMM | ebpf::JEQ_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JEQ_REG | ebpf::JEQ_REG32 => {
@@ -422,50 +424,65 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JGT_IMM | ebpf::JGT_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JGT_REG | ebpf::JGT_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JGE_IMM | ebpf::JGE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    // ARM ISA only has LS and HI unsigned comparison condtions,
+                    // they mean: LS -> unsigned lower or same
+                    //            HI -> unsigned higher
+                    // Because of this we cannot directly translate the unsigned
+                    // GE and LT in eBPF, rather we need to flip the order of
+                    // comparison and use the opposite condition as follows:
+                    // GE x, y -> compare y, x  and use LS condition
+                    // LT x, y -> compare y, x and use the HI condition.
+                    // The problem is that we cannot filp the order when comparing
+                    // with immediate, thus we need to load it into a register
+                    //
+                    // We use GE for now: TODO implement the above if breaks.
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JGE_REG | ebpf::JGE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JLT_IMM | ebpf::JLT_IMM32 => {
                     // Note: JLT wants to use an unsigned comparison but our LT is signed -> how to
                     // get around this? Can we repurpose the Condition::HI and reordering operands?
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm  as u16 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JLT_REG | ebpf::JLT_REG32 => {
+                    // We need to handle unsigned LT in as special way as ARM ISA
+                    // doesn't provide that condition (we only have LS) which
+                    // is unsigned Lower or Same.
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JLE_IMM | ebpf::JLE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16}.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LS, imm: insn.off as i32 }.emit_into(mem)?;
                 }
-                ebpf::JLE_REG | ebpf::JLE_REG32 => todo!(),
+                ebpf::JLE_REG | ebpf::JLE_REG32 => {
+                    I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::LS, imm: insn.off as i32 }.emit_into(mem)?;
+                }
+
                 ebpf::JSET_IMM | ebpf::JSET_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::CS, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSET_REG | ebpf::JSET_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::CS, imm: insn.off as i32 }.emit_into(mem)?;
                 }
-                /*{
-                    self.emit_alu64(mem, 0x85, src, dst);
-                    self.emit_jcc(mem, 0x85, target_pc);
-                }*/
                 ebpf::JNE_IMM | ebpf::JNE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::NE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JNE_REG | ebpf::JNE_REG32 => {
@@ -473,7 +490,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::NE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSGT_IMM | ebpf::JSGT_IMM32 =>{
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSGT_REG | ebpf::JSGT_REG32 => {
@@ -481,7 +498,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSGE_IMM | ebpf::JSGE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSGE_REG | ebpf::JSGE_REG32 => {
@@ -489,7 +506,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSLT_IMM | ebpf::JSLT_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSLT_REG | ebpf::JSLT_REG32 => {
@@ -497,7 +514,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSLE_IMM | ebpf::JSLE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm as u16}.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSLE_REG | ebpf::JSLE_REG32 =>{

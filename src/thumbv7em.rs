@@ -110,11 +110,11 @@ pub enum ThumbInstruction {
     },
     MoveImmediate {
         rd: u8,
-        imm: u8,
+        imm: i32,
     },
     CompareImmediate {
         rd: u8,
-        imm8: u8,
+        imm: u16,
     },
     Add8BitImmediate {
         rd: u8,
@@ -252,6 +252,8 @@ pub enum ThumbInstruction {
         rn: u8,
         rt: u8,
     },
+    /// Store Register (immediate) calculates an address from a base register (`rn`) value and an
+    /// immediate offset (`imm`), and stores a word from a register (`tn`) to memory.
     StoreRegisterImmediate {
         imm: i16,
         rn: u8,
@@ -381,12 +383,31 @@ impl ThumbInstruction {
                 thumb16::Imm3TwoRegsEncoding::new(SUB_OPCODE, *imm3, *rn, *rd).emit(mem)
             }
             ThumbInstruction::MoveImmediate { rd, imm } => {
-                const MOV_OPCODE: u8 = 0b0100;
-                thumb16::Imm8OneRegEncoding::new(BASIC, MOV_OPCODE, *imm, *rd).emit(mem)
+                // We use different encodings based on the size of the immediate.
+                if (*imm as u32) >= (1 << 16) {
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        format!("[JIT] Instruction MOV with immediate {:#x} which does not fit into 16 bits.", imm),));
+                }
+
+                if (*imm as u16) < (1 << 8) {
+                    const MOV_OPCODE: u8 = 0b0100;
+                    return thumb16::Imm8OneRegEncoding::new(BASIC, MOV_OPCODE, *imm as u8, *rd)
+                        .emit(mem);
+                } else {
+                    let opcode = Thumb32OpcodeEncoding::new(0b10, 0b100100, 0b0);
+                    return thumb32::Imm16OneRegEncoding::new(opcode, *rd, *imm as u16).emit(mem);
+                }
             }
-            ThumbInstruction::CompareImmediate { rd, imm8 } => {
-                const CPM_OPCODE: u8 = 0b0101;
-                thumb16::Imm8OneRegEncoding::new(BASIC, CPM_OPCODE, *imm8, *rd).emit(mem)
+            ThumbInstruction::CompareImmediate { rd, imm } => {
+                if *imm < (1 << 8) {
+                    const CPM_OPCODE: u8 = 0b0101;
+                    return thumb16::Imm8OneRegEncoding::new(BASIC, CPM_OPCODE, *imm as u8, *rd)
+                        .emit(mem);
+                } else {
+                    let opcode = Thumb32OpcodeEncoding::new(0b10, 0b11011, 0b0);
+                    return thumb32::Imm12OneRegEncoding::new(opcode, *rd, *imm as u16).emit(mem);
+                }
             }
             ThumbInstruction::Add8BitImmediate { rd, imm8 } => {
                 const SUB_OPCODE: u8 = 0b110;
