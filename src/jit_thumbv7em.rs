@@ -533,14 +533,17 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
 
-                ebpf::CALL => todo!(), /*{
+                ebpf::CALL => {
                     // For JIT, helpers in use MUST be registered at compile time. They can be
                     // updated later, but not created after compiling (we need the address of the
                     // helper function in the JIT-compiled program).
                     if let Some(helper) = helpers.get(&(insn.imm as u32)) {
-                        // We reserve R1 for shifts
-                        self.emit_mov(mem, R9, R1);
-                        self.emit_call(mem, *helper as usize);
+                        let mut helper_addr = *helper as u32;
+                        // We set the ARM Thumb instruction set selection bit so
+                        // that the CPU knows that we aren't trying to change the instruction set.
+                        helper_addr |= 0b1;
+                        I::MoveImmediate { rd: SPILL_REG1, imm: helper_addr as i32 }.emit_into(mem)?;
+                        I::BranchAndExchange { rm: SPILL_REG1 }.emit_into(mem)?;
                     } else {
                         Err(Error::new(
                             ErrorKind::Other,
@@ -550,7 +553,7 @@ impl JitCompiler {
                             ),
                         ))?;
                     };
-                }*/
+                }
                 ebpf::TAIL_CALL => {
                     unimplemented!()
                 }
