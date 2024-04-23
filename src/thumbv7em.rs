@@ -1,3 +1,4 @@
+use crate::jit_thumbv7em::SPILL_REG1;
 use crate::thumb_16bit_encoding::{
     self as thumb16, Emittable, InstructionClassOpcode, Thumb16OpcodeEncoding, BASIC,
     DATA_PROCESSING, MISCELLANEOUS,
@@ -93,6 +94,8 @@ pub enum ThumbInstruction {
         rn: u8,
         rd: u8,
     },
+    /// Subtract (register) subtracts an optionally-shifted register value `rm` from a register value `rn`, and writes the result to the
+    /// destination register `rd`. It can optionally update the condition flags based on the result.
     Subtract {
         rm: u8,
         rn: u8,
@@ -114,7 +117,7 @@ pub enum ThumbInstruction {
     },
     CompareImmediate {
         rd: u8,
-        imm: u16,
+        imm: i32,
     },
     Add8BitImmediate {
         rd: u8,
@@ -180,6 +183,14 @@ pub enum ThumbInstruction {
     MultiplyTwoRegisters {
         rm: u8,
         rd: u8,
+    },
+    /// Signed Divide divides a 32-bit signed integer register value `rn` by a 32-bit signed
+    /// integer register value `rm`, and writes the result to the destination register `rd`.
+    /// The condition code flags are not affected.
+    SignedDivide {
+        rd: u8,
+        rm: u8,
+        rn: u8,
     },
     BitClear {
         rm: u8,
@@ -384,10 +395,34 @@ impl ThumbInstruction {
             }
             ThumbInstruction::MoveImmediate { rd, imm } => {
                 // We use different encodings based on the size of the immediate.
-                if (*imm as u32) >= (1 << 16) {
+                if 0 < *imm && (*imm as u32) >= (1 << 16) {
                     return Err(Error::new(
                         ErrorKind::Other,
                         format!("[JIT] Instruction MOV with immediate {:#x} which does not fit into 16 bits.", imm),));
+                }
+
+                // If the immediate is negative, we have a problem as we need
+                // to use the encoding T2 which uses the ThumbExpandImm procedure
+                // when transforming the instruction immediate into the actual value
+                // that the CPU gets. Because of this we need to get around it
+                // by moving 0 into the target register and then subtracting the
+                // desired value from it. The ideal solution would be to use
+                // the ThumbExpandImm encoding correctly but for that we need
+                // an inverse function that given a desired immediate value would
+                // yield the encoding that produces it after applying ThumbExpandImm
+                // which we currently don't have.
+                if *imm < 0 {
+                    if imm.abs() >= (1 << 8) {
+                        return Err(Error::new(
+                            ErrorKind::Other,
+                            format!("[JIT] Instruction MOV with negative immediate {:#x} which does not fit into 8 bits.", imm),));
+                    }
+                    ThumbInstruction::MoveImmediate { rd: *rd, imm: 0 }.emit_into(mem)?;
+                    return ThumbInstruction::Subtract8BitImmediate {
+                        rd: *rd,
+                        imm8: (-1 * imm) as u8,
+                    }
+                    .emit_into(mem);
                 }
 
                 if (*imm as u16) < (1 << 8) {
@@ -400,13 +435,38 @@ impl ThumbInstruction {
                 }
             }
             ThumbInstruction::CompareImmediate { rd, imm } => {
-                if *imm < (1 << 8) {
+                if 0 < *imm && *imm < (1 << 8) {
                     const CPM_OPCODE: u8 = 0b0101;
                     return thumb16::Imm8OneRegEncoding::new(BASIC, CPM_OPCODE, *imm as u8, *rd)
                         .emit(mem);
                 } else {
+                    /* // This encoding transforms the immediate operand using the
+                     * ThumbExpandImm which is not implemented yet. In short
+                     * the way it works is that it uses the top 4 bits of the immediate
+                     * to determine how the remaining 8 bits should be shifted
+                     * withing a 32 bit window to allow for representing a wider
+                     * range of useful values. the problem is that four our translation
+                     * from eBPF to ARM we would need an inverse function of that
+                     * encoding which given the raw binary immediate that eBPF gives
+                     * us, would give use the immediate encoding that would yield the
+                     * original immediate value after applying the ThumbExpandImm
+                     * to it. We currently don't have it so we spill the immediate
+                     * to some register and then use CompareRegister instruction
+                     *
+                     *
                     let opcode = Thumb32OpcodeEncoding::new(0b10, 0b11011, 0b0);
                     return thumb32::Imm12OneRegEncoding::new(opcode, *rd, *imm as u16).emit(mem);
+                    */
+                    ThumbInstruction::MoveImmediate {
+                        rd: SPILL_REG1,
+                        imm: *imm as i32,
+                    }
+                    .emit_into(mem)?;
+                    ThumbInstruction::CompareRegisters {
+                        rm: SPILL_REG1,
+                        rd: *rd,
+                    }
+                    .emit_into(mem)
                 }
             }
             ThumbInstruction::Add8BitImmediate { rd, imm8 } => {
@@ -688,6 +748,10 @@ impl ThumbInstruction {
             }
             ThumbInstruction::NoOperationHint => thumb16::HintEncoding::new(0b0, 0b0).emit(mem),
             ThumbInstruction::CompareRegistersShift { rm, rd, shift } => todo!(),
+            ThumbInstruction::SignedDivide { rd, rm, rn } => {
+                let opcode = Thumb32OpcodeEncoding::new(0b11, 0b0111001, 0b1);
+                thumb32::ThreeRegsEncoding::new(opcode, *rd, *rn, *rm).emit(mem)
+            }
         }
     }
 }

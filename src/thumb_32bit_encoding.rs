@@ -223,3 +223,35 @@ impl Emittable for Imm16OneRegEncoding {
         Ok(())
     }
 }
+
+pub struct ThreeRegsEncoding {
+    opcode: Thumb32OpcodeEncoding,
+    rd: u8,
+    rn: u8,
+    rm: u8,
+}
+
+impl ThreeRegsEncoding {
+    pub fn new(opcode: Thumb32OpcodeEncoding, rd: u8, rn: u8, rm: u8) -> Self {
+        Self { opcode, rd, rn, rm }
+    }
+}
+
+impl Emittable for ThreeRegsEncoding {
+    fn emit(&self, mem: &mut JitMemory) -> Result<(), Error> {
+        let mut encoding = 0;
+        // Because of the endianness of the machine (we are in Little Endian)
+        // we need to encode the two words in reverse order.
+        encoding |= self.rm as u32 & 0b1111;
+        encoding |= 0b1111 << 4;
+        encoding |= (self.rd as u32 & 0b1111) << 8;
+        encoding |= 0b1111 << 12;
+
+        encoding <<= 16;
+        encoding |= self.rn as u32 & 0b1111;
+        let opcode_encoding: u32 = self.opcode.into();
+        encoding |= opcode_encoding;
+        emit::<u32>(mem, encoding);
+        Ok(())
+    }
+}

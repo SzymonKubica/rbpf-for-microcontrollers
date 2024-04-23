@@ -70,7 +70,7 @@ const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
 /// in the Thumb ISA used by the Cortex M, because of this, we need to move the
 /// immediate constant into some register and then use the instruction which operates
 /// on registers. We use this register for that.
-const SPILL_REG1: u8 = R3;
+pub const SPILL_REG1: u8 = R3;
 const SPILL_REG2: u8 = R4;
 
 // Return the ARMv7-eM register for the given eBPF register
@@ -250,18 +250,13 @@ impl JitCompiler {
 
                 }
                 ebpf::ST_H_IMM =>  {
-                    // The ARM ISA does not support storing immediates into memory
-                    // We need to load it into a spill register instead and then store it.
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::StoreRegisterHalfwordImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?
 
                 }
                 ebpf::ST_W_IMM => {
-                    // The ARM ISA does not support storing immediates into memory
-                    // We need to load it into a spill register instead and then store it.
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?
-
                 }
                 ebpf::ST_DW_IMM =>  error_32_bit_arch()?,
                 // BPF_STX class
@@ -334,13 +329,29 @@ impl JitCompiler {
                 ebpf::MUL32_REG | ebpf::MUL64_REG => {
                     I::MultiplyTwoRegisters { rm: src, rd: dst }.emit_into(mem)?;
                 }
-                ebpf::DIV32_IMM | ebpf::DIV64_IMM => todo!(),
-                ebpf::DIV32_REG | ebpf::DIV64_REG => todo!(),
-                ebpf::MOD32_IMM | ebpf::MOD64_IMM => todo!(),
-                ebpf::MOD32_REG | ebpf::MOD64_REG => todo!(),
-                /*{
-                    self.emit_muldivmod(mem, insn_ptr as u16, insn.opc, src, dst, insn.imm)
-                }*/
+                ebpf::DIV32_IMM | ebpf::DIV64_IMM => {
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
+                    I::SignedDivide { rd: dst, rm: SPILL_REG1, rn: dst }.emit_into(mem)?;
+                }
+                ebpf::DIV32_REG | ebpf::DIV64_REG => {
+                    I::SignedDivide { rd: dst, rm: src, rn: dst }.emit_into(mem)?;
+                }
+                ebpf::MOD32_IMM | ebpf::MOD64_IMM => {
+                    // Armv7-eM does not support modulo instructions, we need to
+                    // get around that by performing a signed division and then subtracting the
+                    // result times the divisor from the original value of the register, i.e.:
+                    // x % y = x - y * (x / y)
+                    I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
+                    I::SignedDivide { rd: SPILL_REG2, rm: SPILL_REG1, rn: dst }.emit_into(mem)?;
+                    I::MultiplyTwoRegisters { rm: SPILL_REG1, rd: SPILL_REG2 }.emit_into(mem)?;
+                    I::Subtract { rm: SPILL_REG2, rn: dst, rd: dst }.emit_into(mem)?;
+                }
+                ebpf::MOD32_REG | ebpf::MOD64_REG => {
+                    // We need to work around the mod as above
+                    I::SignedDivide { rd: SPILL_REG2, rm: src, rn: dst }.emit_into(mem)?;
+                    I::MultiplyTwoRegisters { rm: src, rd: SPILL_REG2 }.emit_into(mem)?;
+                    I::Subtract { rm: SPILL_REG2, rn: dst, rd: dst }.emit_into(mem)?;
+                }
                 ebpf::OR32_IMM | ebpf::OR64_IMM => {
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::LogicalOR { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
@@ -416,7 +427,7 @@ impl JitCompiler {
                 // values in the registers) the behaviour of both classes is the same.
                 ebpf::JA => todo!(), //self.emit_jmp(mem, target_pc),
                 ebpf::JEQ_IMM | ebpf::JEQ_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JEQ_REG | ebpf::JEQ_REG32 => {
@@ -424,7 +435,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JGT_IMM | ebpf::JGT_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JGT_REG | ebpf::JGT_REG32 => {
@@ -444,7 +455,7 @@ impl JitCompiler {
                     // with immediate, thus we need to load it into a register
                     //
                     // We use GE for now: TODO implement the above if breaks.
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JGE_REG | ebpf::JGE_REG32 => {
@@ -454,7 +465,7 @@ impl JitCompiler {
                 ebpf::JLT_IMM | ebpf::JLT_IMM32 => {
                     // Note: JLT wants to use an unsigned comparison but our LT is signed -> how to
                     // get around this? Can we repurpose the Condition::HI and reordering operands?
-                    I::CompareImmediate { rd: dst, imm: insn.imm  as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JLT_REG | ebpf::JLT_REG32 => {
@@ -465,7 +476,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JLE_IMM | ebpf::JLE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16}.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::LS, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JLE_REG | ebpf::JLE_REG32 => {
@@ -474,7 +485,7 @@ impl JitCompiler {
                 }
 
                 ebpf::JSET_IMM | ebpf::JSET_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::CS, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSET_REG | ebpf::JSET_REG32 => {
@@ -482,7 +493,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::CS, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JNE_IMM | ebpf::JNE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::NE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JNE_REG | ebpf::JNE_REG32 => {
@@ -490,7 +501,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::NE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSGT_IMM | ebpf::JSGT_IMM32 =>{
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSGT_REG | ebpf::JSGT_REG32 => {
@@ -498,7 +509,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSGE_IMM | ebpf::JSGE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSGE_REG | ebpf::JSGE_REG32 => {
@@ -506,7 +517,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSLT_IMM | ebpf::JSLT_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16 }.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSLT_REG | ebpf::JSLT_REG32 => {
@@ -514,7 +525,7 @@ impl JitCompiler {
                     I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSLE_IMM | ebpf::JSLE_IMM32 => {
-                    I::CompareImmediate { rd: dst, imm: insn.imm as u16}.emit_into(mem)?;
+                    I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
                 }
                 ebpf::JSLE_REG | ebpf::JSLE_REG32 =>{
@@ -568,7 +579,11 @@ impl JitCompiler {
 
         // Move register 0 into R0
         if map_register(0) != R0 {
-            //self.emit_mov(mem, map_register(0), R0);
+            I::MoveRegistersSpecial {
+                rm: map_register(0),
+                rd: R0,
+            }
+            .emit_into(mem)?;
         }
 
         // Deallocate stack space
