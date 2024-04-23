@@ -396,9 +396,27 @@ impl ThumbInstruction {
             ThumbInstruction::MoveImmediate { rd, imm } => {
                 // We use different encodings based on the size of the immediate.
                 if 0 < *imm && (*imm as u32) >= (1 << 16) {
-                    return Err(Error::new(
-                        ErrorKind::Other,
-                        format!("[JIT] Instruction MOV with immediate {:#x} which does not fit into 16 bits.", imm),));
+                    // We could use the ThumbExpandImm encoding to represent larger
+                    // numbers, however this has a limitation that not all 32-bit
+                    // numbers are expressible using that encoding. For instance
+                    // in case of helper function calls, we need to load the 32-bit
+                    // address of a function into a register, and often it is a bit-string
+                    // which isn't expressible using ThumbExpandImm. For instance
+                    // we could get and address like 0x8015663 which in binary
+                    // is 1000000000010101011001100011 and that has non-zero
+                    // bits in all four bytes of the 32-bit value, and it doesn't have
+                    // a repeating pattern. Because of this one cannot use ThumbExpandImm
+                    // to represent it. Instead we load the higher 16 bits into the
+                    // target register first, then lsl it by 16 bits and then
+                    // add the remaining 16 bits to it.
+
+                    let higher_halfword = (*imm >> 16) as u16;
+                    let lower_halfword = *imm as u16;
+
+                    ThumbInstruction::MoveImmediate{ rd: *rd, imm: higher_halfword as i32}.emit_into(mem)?;
+                    ThumbInstruction::LogicalShiftLeftImmediate { imm5: 16, rm: *rd, rd: *rd}.emit_into(mem)?;
+                    ThumbInstruction::MoveImmediate{ rd: SPILL_REG1, imm: lower_halfword as i32}.emit_into(mem)?;
+                    ThumbInstruction::AddRegistersSpecial { rm: SPILL_REG1, rd: *rd, }.emit_into(mem)?;
                 }
 
                 // If the immediate is negative, we have a problem as we need
