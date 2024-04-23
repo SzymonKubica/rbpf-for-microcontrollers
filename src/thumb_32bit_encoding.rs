@@ -255,3 +255,31 @@ impl Emittable for ThreeRegsEncoding {
         Ok(())
     }
 }
+
+pub struct PopMultipleRegsEncoding {
+    regs: Vec<u8>,
+}
+
+impl PopMultipleRegsEncoding {
+    pub fn new(regs: Vec<u8>) -> Self {
+        Self { regs }
+    }
+}
+
+impl Emittable for PopMultipleRegsEncoding {
+    fn emit(&self, mem: &mut JitMemory) -> Result<(), Error> {
+        let mut encoding = 0;
+
+        let regs_encoding = self.regs.iter().fold(0, |acc, &reg| {
+            acc | (1 << reg)
+        });
+
+        encoding |= regs_encoding as u32;
+        encoding <<= 16;
+        encoding |= 0b1101;
+        let opcode_encoding: u32 = Opcode::new(0b01, 0b1011, 0b0).into();
+        encoding |= opcode_encoding;
+        emit::<u32>(mem, encoding);
+        Ok(())
+    }
+}

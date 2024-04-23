@@ -69,9 +69,10 @@ const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
 /// a given register by an immediate constant, however there is no such instruction
 /// in the Thumb ISA used by the Cortex M, because of this, we need to move the
 /// immediate constant into some register and then use the instruction which operates
-/// on registers. We use this register for that.
-pub const SPILL_REG1: u8 = R3;
-const SPILL_REG2: u8 = R4;
+/// on registers. We use this register for that. We need to figure out which registers we
+/// should be able to access and will never be explicitly touched by the eBPF code.
+pub const SPILL_REG1: u8 = R4;
+pub const SPILL_REG2: u8 = R5;
 
 // Return the ARMv7-eM register for the given eBPF register
 fn map_register(r: u8) -> u8 {
@@ -542,8 +543,17 @@ impl JitCompiler {
                         // We set the ARM Thumb instruction set selection bit so
                         // that the CPU knows that we aren't trying to change the instruction set.
                         helper_addr |= 0b1;
+
                         I::MoveImmediate { rd: SPILL_REG1, imm: helper_addr as i32 }.emit_into(mem)?;
-                        I::BranchAndExchange { rm: SPILL_REG1 }.emit_into(mem)?;
+                        // Important: BLX destroys the contents of the LR register
+                        // (because the called functions needs LR to know where to
+                        // return to). Because of this, we need to preserve the contents
+                        // of LR across function call by pushing it onto the stack
+                        // before the call and then popping it afterwards
+                        let registers = vec![LR];
+                        I::PushMultipleRegisters { registers: registers.clone()  }.emit_into(mem)?;
+                        I::BranchWithLinkAndExchange { rm: SPILL_REG1 }.emit_into(mem)?;
+                        I::PopMultipleRegisters { registers  }.emit_into(mem)?;
                     } else {
                         Err(Error::new(
                             ErrorKind::Other,

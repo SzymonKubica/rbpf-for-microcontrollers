@@ -1,4 +1,4 @@
-use crate::jit_thumbv7em::SPILL_REG1;
+use crate::jit_thumbv7em::{SPILL_REG1, SPILL_REG2};
 use crate::thumb_16bit_encoding::{
     self as thumb16, Emittable, InstructionClassOpcode, Thumb16OpcodeEncoding, BASIC,
     DATA_PROCESSING, MISCELLANEOUS,
@@ -413,10 +413,27 @@ impl ThumbInstruction {
                     let higher_halfword = (*imm >> 16) as u16;
                     let lower_halfword = *imm as u16;
 
-                    ThumbInstruction::MoveImmediate{ rd: *rd, imm: higher_halfword as i32}.emit_into(mem)?;
-                    ThumbInstruction::LogicalShiftLeftImmediate { imm5: 16, rm: *rd, rd: *rd}.emit_into(mem)?;
-                    ThumbInstruction::MoveImmediate{ rd: SPILL_REG1, imm: lower_halfword as i32}.emit_into(mem)?;
-                    ThumbInstruction::AddRegistersSpecial { rm: SPILL_REG1, rd: *rd, }.emit_into(mem)?;
+                    ThumbInstruction::MoveImmediate {
+                        rd: *rd,
+                        imm: higher_halfword as i32,
+                    }
+                    .emit_into(mem)?;
+                    ThumbInstruction::LogicalShiftLeftImmediate {
+                        imm5: 16,
+                        rm: *rd,
+                        rd: *rd,
+                    }
+                    .emit_into(mem)?;
+                    ThumbInstruction::MoveImmediate {
+                        rd: SPILL_REG2,
+                        imm: lower_halfword as i32,
+                    }
+                    .emit_into(mem)?;
+                    return ThumbInstruction::AddRegistersSpecial {
+                        rm: SPILL_REG2,
+                        rd: *rd,
+                    }
+                    .emit_into(mem);
                 }
 
                 // If the immediate is negative, we have a problem as we need
@@ -743,6 +760,9 @@ impl ThumbInstruction {
                 thumb16::CompareAndBranchEncoding::new(0b1, *i, *imm5, *rn).emit(mem)
             }
             ThumbInstruction::PopMultipleRegisters { registers } => {
+                if registers.contains(&LR) {
+                    return thumb32::PopMultipleRegsEncoding::new(registers.to_vec()).emit(mem);
+                }
                 let mut reg_list: u8 = 0;
                 for reg in registers {
                     if reg != &PC {
