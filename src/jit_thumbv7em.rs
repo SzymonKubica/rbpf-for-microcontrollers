@@ -428,7 +428,13 @@ impl JitCompiler {
                 }*/
                 // BPF_JMP and BPF_JMP32 class (because we can only handle 32 bit
                 // values in the registers) the behaviour of both classes is the same.
-                ebpf::JA => todo!(), //self.emit_jmp(mem, target_pc),
+                ebpf::JA => {
+                    // Arm doesn't support condition ALL in the short jump instruction
+                    // encoding. Because of this, we comapre the dst register to
+                    // itself and branch on equality.
+                    I::CompareRegisters { rm: dst, rd: dst }.emit_into(mem)?;
+                    I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
+                }
                 ebpf::JEQ_IMM | ebpf::JEQ_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
