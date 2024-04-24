@@ -737,6 +737,10 @@ impl ThumbInstruction {
                 thumb16::TwoRegsEncoding::new(MISCELLANEOUS, UTXB_OPCODE, *rm, *rd).emit(mem)
             }
             ThumbInstruction::PushMultipleRegisters { registers } => {
+                // The shorter encoding only allows for pushing LR and R0-R7
+                if registers.iter().filter(|&r| r != &LR).any(|&r| r > 7) {
+                    return thumb32::PushMultipleRegsEncoding::new(registers.to_vec()).emit(mem);
+                }
                 const PUSH_OPCODE: u8 = 0b010;
                 let mut reg_list: u8 = 0;
                 for reg in registers {
@@ -764,7 +768,8 @@ impl ThumbInstruction {
                 thumb16::CompareAndBranchEncoding::new(0b1, *i, *imm5, *rn).emit(mem)
             }
             ThumbInstruction::PopMultipleRegisters { registers } => {
-                if registers.contains(&LR) {
+                // The shorter encoding only allows for popping PC and R0-R7
+                if registers.iter().filter(|&r| r != &PC).any(|&r| r > 7) {
                     return thumb32::PopMultipleRegsEncoding::new(registers.to_vec()).emit(mem);
                 }
                 let mut reg_list: u8 = 0;

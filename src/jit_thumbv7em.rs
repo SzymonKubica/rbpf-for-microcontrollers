@@ -134,7 +134,9 @@ impl JitCompiler {
         update_data_ptr: bool, // This isn't used by my version of the jit.
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
-        Self::save_callee_save_registers(mem)?;
+
+        let callee_saved_regs = vec![R4, R5, R6, R7, R8, R10, R11, LR];
+        I::PushMultipleRegisters { registers: callee_saved_regs.clone() }.emit_into(mem)?;
 
         // According to the ARM calling convention, arguments to the function
         // are passed in registers R0-R3.
@@ -654,7 +656,7 @@ impl JitCompiler {
         I::AddImmediateToSP { imm: offset }.emit_into(mem)?;
         I::AddImmediateToSP { imm: offset }.emit_into(mem)?;
 
-        Self::restore_callee_save_registers(mem)?;
+        I::PopMultipleRegisters { registers: callee_saved_regs.clone() }.emit_into(mem)?;
 
         I::BranchAndExchange { rm: LR }.emit_into(mem)?;
 
