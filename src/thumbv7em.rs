@@ -265,6 +265,9 @@ pub enum ThumbInstruction {
     },
     /// Store Register (immediate) calculates an address from a base register (`rn`) value and an
     /// immediate offset (`imm`), and stores a word from a register (`tn`) to memory.
+    /// Note: it only supports positive offsets (as it uses ZeroExtend for immediate operands)
+    /// In order to do a store with negative offset one needs to store the negative
+    /// value into a register and use StoreRegister
     StoreRegisterImmediate {
         imm: i16,
         rn: u8,
@@ -646,7 +649,7 @@ impl ThumbInstruction {
             }
             ThumbInstruction::StoreRegisterImmediate { imm, rn, rt } => {
                 // Special case when we do the SP relative store
-                if *imm < (1 << 8) && *rn == SP && *rt < (1 << 3) {
+                if 0 <= *imm && *imm < (1 << 8) && *rn == SP && *rt < (1 << 3) {
                     // If the immediate fits into 8 bits and we load relative to SP we use
                     // the load register SP relative instruction.
                     const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1001, 4);
@@ -661,7 +664,8 @@ impl ThumbInstruction {
                 emit_load_store(mem, imm, rn, rt, opcode_t1, opcode_t2, opcode_t3)
             }
             ThumbInstruction::LoadRegisterImmediate { imm, rn, rt } => {
-                if *imm < (1 << 8) && *rn == SP && *rt < (1 << 3) {
+                // Special case when we do the SP relative load
+                if 0 <= *imm && *imm < (1 << 8) && *rn == SP && *rt < (1 << 3) {
                     // If the immediate fits into 8 bits and we load relative to SP we use
                     // the load register SP relative instruction.
                     const OP_A: InstructionClassOpcode = InstructionClassOpcode::new(0b1001, 4);
