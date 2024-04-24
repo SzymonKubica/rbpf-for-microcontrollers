@@ -539,6 +539,54 @@ impl JitCompiler {
                     // updated later, but not created after compiling (we need the address of the
                     // helper function in the JIT-compiled program).
                     if let Some(helper) = helpers.get(&(insn.imm as u32)) {
+
+                        // Note: when calling a function, the first four words
+                        // of the argument list are passed in registers R0-R3
+                        // This is different from eBPF where the first argument
+                        // ends up in R1, because of this, we need to shuffle
+                        // registers around so that the function that we call can
+                        // interpret them correctly. The signature of all helper
+                        // functions is the following: fn(u64, u64, u64, u64, u64) -> u64
+                        // Given that ARMv7-eM is a 32-bit architecture, the lower
+                        // word of the first argument is expected to be in R0,
+                        // and the higher one in R1, similarly for the second
+                        // argument, the lower part of the double-word is
+                        // stored in R2, whereas the higher word ends up in R3.
+                        // The remaining arguments should be stored in the stack.
+                        //
+                        // Given that the eBPF bytecode follows the eBPF calling
+                        // convention (where the arguments are stored in R1-R5)
+                        // and we are only dealing with 32-bit values, we need to
+                        // move the value of R1 into R0 and spill the other registers
+                        // R3-R5 onto the stack (R2 is already in its correct place)
+                        //
+                        // Note that this approach is wasteful in that we aren't using
+                        // R1 or R3 as they were supposed to store the upper bits
+                        // of u64 values that we aren't using as we only have u32s.
+                        // We also need to remember to zero the values of those
+                        // registers so that the caller doesn't get confused by some
+                        // leftover bits in those regs.
+                        //
+                        // This could be improved by changing the signature of all
+                        // helper functions to fn(u32, u32, u32, u32, u32) -> u32
+                        // However that would limit functionality supported by
+                        // the interpreted execution which we don't want.
+                        //
+                        // The motivation is that when using the interpreter we
+                        // should aim at highest possible compatibility, whereas
+                        // when using the jit we can sacrifice some compatibility
+                        // (using u64 value) to gain performance.
+
+                        I::MoveRegistersSpecial { rm: R1, rd: R0 }.emit_into(mem)?;
+                        // Clear R1
+                        I::MoveImmediate { rd: R1, imm: 0  }.emit_into(mem)?;
+                        // R2 already contains the correct value.
+                        // We should move R3-R5 to the stack before clearing R3,
+                        // however we don't do that yet as we don't need to
+                        // support helpers with more than 2 arguments right now.
+                        // Clear R3
+                        I::MoveImmediate { rd: R3, imm: 0  }.emit_into(mem)?;
+
                         let mut helper_addr = *helper as u32;
                         // We set the ARM Thumb instruction set selection bit so
                         // that the CPU knows that we aren't trying to change the instruction set.
