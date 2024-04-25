@@ -389,13 +389,13 @@ impl JitCompiler {
                     I::BitwiseAND { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::LSH32_IMM | ebpf::LSH64_IMM => {
-                    I::LogicalShiftLeftImmediate { imm5: insn.imm as u8, rm: src, rd: dst }.emit_into(mem)?;
+                    I::LogicalShiftLeftImmediate { imm5: insn.imm as u8, rm: dst, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::LSH32_REG | ebpf::LSH64_REG => {
                     I::LogicalShiftLeft { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::RSH32_IMM | ebpf::RSH64_IMM => {
-                    I::LogicalShiftRightImmediate { imm5: insn.imm as u8, rm: src, rd: dst }.emit_into(mem)?;
+                    I::LogicalShiftRightImmediate { imm5: insn.imm as u8, rm: dst, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::RSH32_REG | ebpf::RSH64_REG => {
                     I::LogicalShiftRight { rm: src, rd: dst }.emit_into(mem)?;
