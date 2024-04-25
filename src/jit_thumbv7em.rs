@@ -389,13 +389,31 @@ impl JitCompiler {
                     I::BitwiseAND { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::LSH32_IMM | ebpf::LSH64_IMM => {
-                    I::LogicalShiftLeftImmediate { imm5: insn.imm as u8, rm: dst, rd: dst }.emit_into(mem)?;
+                    // For some reason the compiled eBPF does some weird lsl lsr
+                    // manipulations whereby they shift a register value by 32 left
+                    // and then immediately after by 32 right. The problem is that
+                    // this causes our 32 bit registers to overflow and essentially
+                    // flushes the value. I noticed the compiler doing those things
+                    // before comparisons of 32 bit numbers so I suspect the reason
+                    // those instructions are there is to effectively drop the highest
+                    // 32 bits so that we can do a comparison on the lower 32 bits.
+                    //
+                    // Workaound: if an lsl is requested for 32, we emit a noop.
+                    if insn.imm == 32 {
+                        I::NoOperationHint.emit_into(mem)?;
+                    } else {
+                        I::LogicalShiftLeftImmediate { imm5: insn.imm as u8, rm: dst, rd: dst }.emit_into(mem)?;
+                    }
                 }
                 ebpf::LSH32_REG | ebpf::LSH64_REG => {
                     I::LogicalShiftLeft { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::RSH32_IMM | ebpf::RSH64_IMM => {
-                    I::LogicalShiftRightImmediate { imm5: insn.imm as u8, rm: dst, rd: dst }.emit_into(mem)?;
+                    if insn.imm == 32 {
+                        I::NoOperationHint.emit_into(mem)?;
+                    } else {
+                        I::LogicalShiftRightImmediate { imm5: insn.imm as u8, rm: dst, rd: dst }.emit_into(mem)?;
+                    }
                 }
                 ebpf::RSH32_REG | ebpf::RSH64_REG => {
                     I::LogicalShiftRight { rm: src, rd: dst }.emit_into(mem)?;
