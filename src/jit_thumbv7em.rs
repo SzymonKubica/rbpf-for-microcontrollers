@@ -90,15 +90,31 @@ pub fn emit<T>(mem: &mut JitMemory, data: T) {
     mem.offset += core::mem::size_of::<T>();
 }
 
+/// Structure representing a control flow jump. We need it because sometimes
+/// translation from eBPF to ARM involves emitting more instructions than there
+/// were originally in eBPF bytecode. Because of this we need to adjust jump offsets
+/// so that they point to the correct program locations.
 #[derive(Debug)]
 struct Jump {
-    offset_loc: usize,
-    target_pc: isize,
+    // The index of the eBPF branch instruction used to recover the memory offset
+    // of the jump instruction in the emitted assembly
+    insn_ptr: usize,
+    /// The offset of the jump instruction specifying how long the jump needs
+    /// to be in terms of eBPF isntructions (this might mean more actual ARM instructions)
+    offset: isize,
+    /// Instruction to be written into the program once the memory offset is known.
+    condition: Condition,
 }
 
 #[derive(Debug)]
 pub struct JitCompiler {
-    pc_locs: Vec<usize>,
+    /// Program counter locations in the JIT-compiled code. This is needed
+    /// because the translation isn't one-to-one and so sometimes we need to
+    /// emit more than one ARM instruction to translate one eBPF instruction,
+    /// because of this, we need to store the program counter locations of where
+    /// the actual eBPF instructions start so that we can adjust branch offsets
+    /// accordingly later on.
+    pc_locations: Vec<usize>,
     special_targets: HashMap<isize, usize>,
     jumps: Vec<Jump>,
 }
@@ -109,7 +125,7 @@ type I = ThumbInstruction;
 impl JitCompiler {
     pub fn new() -> JitCompiler {
         JitCompiler {
-            pc_locs: vec![],
+            pc_locations: vec![],
             jumps: vec![],
             special_targets: HashMap::new(),
         }
@@ -134,9 +150,11 @@ impl JitCompiler {
         update_data_ptr: bool, // This isn't used by my version of the jit.
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
-
         let callee_saved_regs = vec![R4, R5, R6, R7, R8, R10, R11, LR];
-        I::PushMultipleRegisters { registers: callee_saved_regs.clone() }.emit_into(mem)?;
+        I::PushMultipleRegisters {
+            registers: callee_saved_regs.clone(),
+        }
+        .emit_into(mem)?;
 
         // According to the ARM calling convention, arguments to the function
         // are passed in registers R0-R3.
@@ -146,7 +164,6 @@ impl JitCompiler {
         // R3: mem_len
 
         // Save mem pointer for use with LD_ABS_* and LD_IND_* instructions
-        //self.emit_mov(mem, R2, R10);
         I::MoveRegistersSpecial { rm: R2, rd: R10 }.emit_into(mem)?;
 
         // We need to adjust pointers to the packet buffer and mem according
@@ -182,13 +199,13 @@ impl JitCompiler {
         I::SubtractImmediateFromSP { imm: offset }.emit_into(mem)?;
         I::SubtractImmediateFromSP { imm: offset }.emit_into(mem)?;
 
-        self.pc_locs = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
+        self.pc_locations = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
 
         let mut insn_ptr: usize = 0;
         while insn_ptr * ebpf::INSN_SIZE < prog.len() {
             let insn = ebpf::get_insn(prog, insn_ptr);
 
-            self.pc_locs[insn_ptr] = mem.offset;
+            self.pc_locations[insn_ptr] = mem.offset;
 
             let dst = map_register(insn.dst);
             let src = map_register(insn.src);
@@ -433,23 +450,33 @@ impl JitCompiler {
                     // encoding. Because of this, we comapre the dst register to
                     // itself and branch on equality.
                     I::CompareRegisters { rm: dst, rd: dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
+                    // Instead of emitting the branch instruction we store it in the
+                    // list of jumps to be written into memory once the offsets are
+                    // resolved. Instead we emit a noop instruction so that we have
+                    // a blank spot to fill in later
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::EQ, mem);
+
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JEQ_IMM | ebpf::JEQ_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::EQ, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JEQ_REG | ebpf::JEQ_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::EQ, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::EQ, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JGT_IMM | ebpf::JGT_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::HI, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JGT_REG | ebpf::JGT_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::HI, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::HI, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JGE_IMM | ebpf::JGE_IMM32 => {
                     // ARM ISA only has LS and HI unsigned comparison condtions,
@@ -465,81 +492,99 @@ impl JitCompiler {
                     //
                     // We use GE for now: TODO implement the above if breaks.
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::GE, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JGE_REG | ebpf::JGE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::GE, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JLT_IMM | ebpf::JLT_IMM32 => {
                     // Note: JLT wants to use an unsigned comparison but our LT is signed -> how to
                     // get around this? Can we repurpose the Condition::HI and reordering operands?
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::LT, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JLT_REG | ebpf::JLT_REG32 => {
                     // We need to handle unsigned LT in as special way as ARM ISA
                     // doesn't provide that condition (we only have LS) which
                     // is unsigned Lower or Same.
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::LT, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JLE_IMM | ebpf::JLE_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LS, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::LS, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JLE_REG | ebpf::JLE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LS, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::LS, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
 
                 ebpf::JSET_IMM | ebpf::JSET_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::CS, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::CS, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSET_REG | ebpf::JSET_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::CS, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::CS, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JNE_IMM | ebpf::JNE_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::NE, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::NE, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JNE_REG | ebpf::JNE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::NE, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::NE, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSGT_IMM | ebpf::JSGT_IMM32 =>{
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::GT, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSGT_REG | ebpf::JSGT_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::GT, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::GT, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSGE_IMM | ebpf::JSGE_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::GE, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSGE_REG | ebpf::JSGE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::GE, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::GE, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSLT_IMM | ebpf::JSLT_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::LT, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSLT_REG | ebpf::JSLT_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LT, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::LT, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSLE_IMM | ebpf::JSLE_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::LE, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
                 ebpf::JSLE_REG | ebpf::JSLE_REG32 =>{
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
-                    I::ConditionalBranch { cond: Condition::LE, imm: insn.off as i32 }.emit_into(mem)?;
+                    self.record_cond_branch(insn_ptr, insn.off, Condition::LE, mem);
+                    ThumbInstruction::NoOperationHint.emit_into(mem);
                 }
 
                 ebpf::CALL => {
@@ -662,35 +707,72 @@ impl JitCompiler {
         I::AddImmediateToSP { imm: offset }.emit_into(mem)?;
         I::AddImmediateToSP { imm: offset }.emit_into(mem)?;
 
-        I::PopMultipleRegisters { registers: callee_saved_regs.clone() }.emit_into(mem)?;
+        I::PopMultipleRegisters {
+            registers: callee_saved_regs.clone(),
+        }
+        .emit_into(mem)?;
 
         I::BranchAndExchange { rm: LR }.emit_into(mem)?;
 
         Ok(())
     }
 
+    /// Record a conditional branch instruction for later resolution once the
+    /// actual offset is known.
+    fn record_cond_branch(
+        &mut self,
+        insn_ptr: usize,
+        jump_offset: i16,
+        condition: Condition,
+        mem: &mut JitMemory,
+    ) {
+        let jump = Jump {
+            insn_ptr,
+            offset: jump_offset as isize,
+            condition,
+        };
+        self.jumps.push(jump);
+    }
+
     fn resolve_jumps(&mut self, mem: &mut JitMemory) -> Result<(), Error> {
         for jump in &self.jumps {
-            let target_loc = match self.special_targets.get(&jump.target_pc) {
-                Some(target) => *target,
-                None => self.pc_locs[jump.target_pc as usize],
+            debug!("Resolving jump {:?}", jump);
+
+            // For each of the jump instructions we need to adjust the instruction offset
+            // so that it accounts for the previously emitted instructions (it could be that
+            // during the translation from eBPF to ARM we have emitted more instructions than
+            // the jump offset in the branch instrucition originally accounted for.
+            // Because of this we compute the actual jump offset using the following approach:
+            // 1. We have stored the original location of the jump instruction in the `jump_start_loc`
+            // 2. We have also stored the original intended offset as specified by the eBPF
+            //    instruction
+            // 3. We can recover the actuall offset using the `self.pc_locations`
+            //    which store the actual start address of each 'logical' eBPF instruction
+            //    in the jitted program buffer. The reason I refer to this as 'logical'
+            //    is that a single eBPF instruction might require multiple ARM instructions
+            //    to handle it.
+            // 4. Given all of the above information, the actual jump offset in terms of the
+            //    number of ARM assembly instructions will be given by:
+            let branch_start_mem_offset = self.pc_locations[jump.insn_ptr];
+            debug!("Jump start location: {:#x}", branch_start_mem_offset);
+            let target_offset = self.pc_locations[(jump.insn_ptr as isize + jump.offset) as usize];
+            debug!("Jump target location: {:#x}", target_offset);
+            debug!("eBPF Jump offset: {:#x}", jump.offset);
+            // Offsets are in terms of number of bytes in the jit program memory buffer,
+            // since the base instruction is 2 bytes we divide by 2
+            let actual_offset = (target_offset as isize - branch_start_mem_offset as isize) / 2;
+            debug!("ARM Jump offset: {:#x}", actual_offset);
+
+            debug!("Writing instruction at offset: {:#x} ", branch_start_mem_offset);
+            let mut offset_mem = JitMemory {
+                contents: mem.contents,
+                offset: branch_start_mem_offset,
             };
-
-            // Assumes jump offset is at end of instruction
-            unsafe {
-                let offset_loc = jump.offset_loc as i32 + core::mem::size_of::<i32>() as i32;
-                let rel = &(target_loc as i32 - offset_loc) as *const i32;
-
-                let offset_ptr = mem.contents.as_ptr().add(jump.offset_loc);
-
-                /* TODO: figure out how to do this without libc
-                libc::memcpy(
-                    offset_ptr as *mut libc::c_void,
-                    rel as *const libc::c_void,
-                    core::mem::size_of::<i32>(),
-                );
-                */
+            ThumbInstruction::ConditionalBranch {
+                cond: jump.condition,
+                imm: actual_offset as i32,
             }
+            .emit_into(&mut offset_mem)?;
         }
         Ok(())
     }
@@ -812,7 +894,7 @@ impl<'a> JitMemory<'a> {
 
         let mut jit = JitCompiler::new();
         jit.jit_compile(&mut mem, prog, use_mbuff, update_data_ptr, helpers)?;
-        //jit.resolve_jumps(&mut mem)?;
+        jit.resolve_jumps(&mut mem)?;
 
         Ok(mem)
     }
