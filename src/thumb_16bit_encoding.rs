@@ -466,11 +466,11 @@ impl Emittable for CompareAndBranchEncoding {
 pub struct ConditionalBranchEncoding {
     class_opcode: InstructionClassOpcode,
     cond: Condition,
-    imm: i32,
+    imm: i8,
 }
 
 impl ConditionalBranchEncoding {
-    pub fn new(cond: Condition, imm: i32) -> ConditionalBranchEncoding {
+    pub fn new(cond: Condition, imm: i8) -> ConditionalBranchEncoding {
         ConditionalBranchEncoding {
             class_opcode: COND_BRANCH_AND_SUPERVISOR_CALL,
             cond,
@@ -481,55 +481,23 @@ impl ConditionalBranchEncoding {
 
 impl Emittable for ConditionalBranchEncoding {
     fn emit(&self, mem: &mut JitMemory) -> Result<(), Error> {
-        // Note: the concitional branch (B) Thumb instruction only allows for
-        // jumps that are multiples of 2. Because of this, if the llvm compiler
-        // produces bytecode that tells us to jump by say '1' PC-relative,
-        // we need to fix things and introduce a no-op instruction that would
-        // make the jump a multiple of 2. The proposed workflow is as follows:
-        //
-        // 1. The jump offset is positive (forward jump) and odd:
-        //    - a no-op instruction is inserted after the jump jump instrution
-        //      to make the required offset even (by increasing it by 1)
-        // 1. The jump offset is negative (forward jump) and odd
-        //    - a no-op instruction is inserted before the jump instruction
-        //      to make the required offset even (by decreasing it by 1 (making its absolute value
-        //      larger -> longer jump))
-
-        // The immediate is made even and divided by two as the instruction immediate
-        // is extended by 0 on the right when decoded by the CPU.
-        let imm = if self.imm % 2 != 0 {
-            let sign = if self.imm > 0 { 1 } else { -1 };
-            sign * (self.imm.abs() + 1) / 2 // We increase the jump length by making it 1 step longer
-        } else {
-            self.imm / 2
-        };
-
-        // Get the right encoding depending on the size of the immediate offset.
-        let encoding = if -128 < imm && imm < 127 {
-            // The immediate fits into the encoding T1
-            let mut encoding = 0;
-            self.class_opcode.apply(&mut encoding);
-            encoding |= (self.cond as u16 & 0b1111) << 8;
-            // We need to cast as i8 to preserve sign.
-            debug!("imm: {}", imm);
-            encoding |= (imm as u8) as u16;
-            encoding
-        } else {
-            0
-        };
-
-        if self.imm % 2 != 0 {
-            if self.imm > 0 {
-                // Immediate positive => forward jump => no-op inserted after the branch
-                emit::<u16>(mem, encoding);
-                ThumbInstruction::NoOperationHint.emit_into(mem)?;
-            } else {
-                // Immediate negative => backward jump => no-op inserted before the branch
-                ThumbInstruction::NoOperationHint.emit_into(mem)?;
-                emit::<u16>(mem, encoding);
-            }
-        }
-
+        // The immediate fits into the encoding T1
+        let mut encoding = 0;
+        debug!(
+            "Writing conditional branch with offset as u8: {} ({:#x})",
+            self.imm as u8, self.imm as u8
+        );
+        debug!(
+            "Writing conditional branch with offset: {} ({:#x})",
+            self.imm, self.imm
+        );
+        self.class_opcode.apply(&mut encoding);
+        encoding |= (self.cond as u16 & 0b1111) << 8;
+        // Here the cast as u8 is needed because negative numbers will
+        // have lots of 1s in front of them after casting to u16 which will
+        // corrupt the higher bits of the encoding.
+        encoding |= (self.imm as u8) as u16;
+        emit::<u16>(mem, encoding);
         Ok(())
     }
 }
