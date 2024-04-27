@@ -204,7 +204,7 @@ impl JitCompiler {
             InterpreterVariant::FemtoContainersHeader => prog,
             InterpreterVariant::ExtendedHeader => prog,
             InterpreterVariant::RawObjectFile => {
-                let Ok(binary) = goblin::elf::Elf::parse(&prog) else {
+                let Ok(binary) = goblin::elf::Elf::parse(prog) else {
                     Err(Error::new(ErrorKind::Other, "Failed to parse ELF binary"))?
                 };
 

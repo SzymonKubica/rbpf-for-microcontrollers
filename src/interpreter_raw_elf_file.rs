@@ -651,7 +651,7 @@ pub fn execute_program(
 
 pub fn extract_section<'a>(
     section_name: &'static str,
-    binary: &'a goblin::elf::Elf<'_>,
+    binary: &goblin::elf::Elf<'_>,
     program: &'a [u8],
 ) -> Result<&'a [u8], String> {
     for section in &binary.section_headers {
