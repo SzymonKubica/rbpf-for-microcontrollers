@@ -928,13 +928,6 @@ fn emit_load_store(
         .emit(mem);
     }
 
-    // T3: 12-bit immediate and two 4-bit registers -> 32 bit encoding
-    if (1 << 8) <= *imm && *imm < (1 << 12) {
-        return thumb32::Imm12TwoRegsEncoding::new(opcode_t3, *rn, *rt, *imm as u16).emit(mem);
-    }
-
-    Err(Error::new(
-        ErrorKind::Other,
-        format!("[JIT] Invalid immediate: {:#x}.", imm),
-    ))
+    // T3: catch-all 12-bit immediate and two 4-bit registers -> 32 bit encoding
+    return thumb32::Imm12TwoRegsEncoding::new(opcode_t3, *rn, *rt, *imm as u16).emit(mem);
 }

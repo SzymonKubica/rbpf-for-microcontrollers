@@ -208,7 +208,9 @@ impl JitCompiler {
                     Err(Error::new(ErrorKind::Other, "Failed to parse ELF binary"))?
                 };
 
-                let Ok(text_section) = crate::interpreter_raw_elf_file::extract_section(".text", &binary, prog) else {
+                let Ok(text_section) =
+                    crate::interpreter_raw_elf_file::extract_section(".text", &binary, prog)
+                else {
                     Err(Error::new(ErrorKind::Other, ".text section not found"))?
                 };
                 text_section
@@ -264,7 +266,14 @@ impl JitCompiler {
                 }*/
                 ebpf::LD_DW_IMM => {
                     // Here in case of lddw, even though eBPF specifies a load of
-                    // a 64 bit immediate,
+                    // a 64 bit immediate, we cannot do this as our architecture is only 32 bit
+                    // long. Since the top 32 bits of the immediate are located in
+                    // the second part of the long lddw instruction, we can extract the
+                    // 32 bits that we care about directly from the immediate. We need
+                    //  to increase the instruction pointer to skip the second part of the
+                    //  instruction.
+                    insn_ptr += 1;
+                    I::MoveImmediate { rd: dst, imm: insn.imm as i32}.emit_into(mem)?;
                 }
                 /*{
                     insn_ptr += 1;
