@@ -7,7 +7,6 @@
 // Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
 //      (Adaptation for ARM thumbv7em architecture running on ARM Cortex M4)
 
-use alloc::string::ToString;
 use core::mem;
 use core::ops::{Index, IndexMut};
 use log::debug;
@@ -17,6 +16,8 @@ use stdlib::{Error, ErrorKind, String};
 
 use ebpf;
 use thumbv7em::*;
+
+use crate::InterpreterVariant;
 
 /// The jit-compiled code can then be called as a function
 /// the arguments to this function are as follows:
@@ -119,31 +120,24 @@ pub struct JitCompiler {
     pc_locations: Vec<usize>,
     special_targets: HashMap<isize, usize>,
     jumps: Vec<Jump>,
+    /// Specifies the binary laout of the eBPF program code buffer so that the
+    /// jit compiler is able to extract the text section from it and start translating
+    /// instructions.
+    interpreter_variant: InterpreterVariant,
 }
 
 /// Type alias for conciseness
 type I = ThumbInstruction;
 
 impl JitCompiler {
-    pub fn new() -> JitCompiler {
+    pub fn new(interpreter: InterpreterVariant) -> JitCompiler {
         JitCompiler {
             pc_locations: vec![],
             jumps: vec![],
             special_targets: HashMap::new(),
+            interpreter_variant: interpreter,
         }
     }
-
-    // This is supposed to allow us to jump back to LR.
-    fn emit_b(&mut self, mem: &mut JitMemory, reg: u8) {
-        let template: u16 = 0b0100011100000000;
-        emit::<u16>(mem, template | ((reg & 0b1111) << 3) as u16);
-    }
-
-    fn emit_mov_imm8(&self, mem: &mut JitMemory, imm: u8, dst: u8) {
-        let template: u16 = 0b00100 << 11;
-        emit::<u16>(mem, template | ((dst as u16) << 8) | imm as u16);
-    }
-
     pub fn jit_compile(
         &mut self,
         mem: &mut JitMemory,
@@ -203,6 +197,24 @@ impl JitCompiler {
 
         self.pc_locations = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
 
+        // Depending on the binary file layout the pointer to the first instruction
+        // is located in different places.
+        let prog = match self.interpreter_variant {
+            InterpreterVariant::Default => prog,
+            InterpreterVariant::FemtoContainersHeader => prog,
+            InterpreterVariant::ExtendedHeader => prog,
+            InterpreterVariant::RawObjectFile => {
+                let Ok(binary) = goblin::elf::Elf::parse(&prog) else {
+                    Err(Error::new(ErrorKind::Other, "Failed to parse ELF binary"))?
+                };
+
+                let Ok(text_section) = crate::interpreter_raw_elf_file::extract_section(".text", &binary, prog) else {
+                    Err(Error::new(ErrorKind::Other, ".text section not found"))?
+                };
+                text_section
+            }
+        };
+
         let mut insn_ptr: usize = 0;
         while insn_ptr * ebpf::INSN_SIZE < prog.len() {
             let insn = ebpf::get_insn(prog, insn_ptr);
@@ -250,7 +262,10 @@ impl JitCompiler {
                     self.emit_alu64(mem, 0x01, src, R11); // add src to R11
                     self.emit_load(mem, OperandSize::S64, R11, R0, insn.imm); // ld R0, mem[src+imm]
                 }*/
-                ebpf::LD_DW_IMM => todo!(),
+                ebpf::LD_DW_IMM => {
+                    // Here in case of lddw, even though eBPF specifies a load of
+                    // a 64 bit immediate,
+                }
                 /*{
                     insn_ptr += 1;
                     let second_part = ebpf::get_insn(prog, insn_ptr).imm as u64;
@@ -911,13 +926,14 @@ impl<'a> JitMemory<'a> {
         helpers: &HashMap<u32, ebpf::Helper>,
         use_mbuff: bool,
         update_data_ptr: bool,
+        interpreter_variant: InterpreterVariant,
     ) -> Result<JitMemory<'a>, Error> {
         let mut mem = JitMemory {
             contents: jit_memory_buff,
             offset: 0,
         };
 
-        let mut jit = JitCompiler::new();
+        let mut jit = JitCompiler::new(interpreter_variant);
         jit.jit_compile(&mut mem, prog, use_mbuff, update_data_ptr, helpers)?;
         jit.resolve_jumps(&mut mem)?;
 
