@@ -443,7 +443,8 @@ impl JitCompiler {
                     I::LogicalShiftRight { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::NEG32 | ebpf::NEG64 => {
-                    I::BitwiseNOT { rm: dst, rd: dst }.emit_into(mem)?;
+                    I::MoveImmediate { rd: SPILL_REG1, imm: -1 }.emit_into(mem)?;
+                    I::MultiplyTwoRegisters { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::XOR32_IMM | ebpf::XOR64_IMM => {
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
