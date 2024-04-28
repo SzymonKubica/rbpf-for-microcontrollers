@@ -437,7 +437,16 @@ impl JitCompiler {
                     I::LogicalShiftLeft { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::RSH32_IMM | ebpf::RSH64_IMM => {
-                    I::LogicalShiftRightImmediate { imm5: (insn.imm % 32) as u8, rm: dst, rd: dst }.emit_into(mem)?;
+                    // In case of LSR, setting the immediate to 0 is interpreted
+                    // by the CPU as 32, which in our case is not what we want,
+                    // in case of the full shift by 32 places, we want this
+                    // to be a noop, hence we emit a corresponding `nop` instruction
+                    if insn.imm == 32 {
+                        I::NoOperationHint.emit_into(mem)?;
+                    } else {
+                        I::LogicalShiftRightImmediate { imm5: (insn.imm % 32) as u8, rm: dst, rd: dst }.emit_into(mem)?;
+                    }
+
                 }
                 ebpf::RSH32_REG | ebpf::RSH64_REG => {
                     I::LogicalShiftRight { rm: src, rd: dst }.emit_into(mem)?;
