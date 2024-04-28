@@ -357,6 +357,11 @@ pub enum ThumbInstruction {
     // WaitForInterruptHint,
     // SendEventHint,
     // Conditional branch and supervisor call
+    /// Causes a jump to at target address specified an offset from the current
+    /// PC value. The current PC value of a given instruction is equal to the
+    /// address of the instruction + 4. Because of this, when translating jump
+    /// offsets from eBPF to ARM we need to subtract 1 from the resulting
+    /// ARM offset to account for the fact that PC value is address + 4
     ConditionalBranch {
         cond: Condition,
         imm: i32,
@@ -794,31 +799,6 @@ impl ThumbInstruction {
             //ThumbInstruction::SendEventHint => todo!(),
             //ThumbInstruction::SupervisorCall => todo!(),
             ThumbInstruction::ConditionalBranch { cond, imm } => {
-                // Note: the concitional branch (B) Thumb instruction only allows for
-                // jumps that are multiples of 2. Because of this, if the llvm compiler
-                // produces bytecode that tells us to jump by say '1' PC-relative,
-                // we need to fix things and introduce a no-op instruction that would
-                // make the jump a multiple of 2. The proposed workflow is as follows:
-                //
-                // 1. The jump offset is positive (forward jump) and odd:
-                //    - a no-op instruction is inserted after the jump jump instruction
-                //      to make the required offset even (by increasing it by 1)
-                // 1. The jump offset is negative (forward jump) and odd
-                //    - a no-op instruction is inserted before the jump instruction
-                //      to make the required offset even (by decreasing it by 1 (making its absolute value
-                //      larger -> longer jump))
-
-                // The immediate is made even and divided by two as the instruction immediate
-                // is extended by 0 on the right when decoded by the CPU.
-                /*
-                let immediate = if imm % 2 != 0 {
-                    let sign = if *imm > 0 { 1 } else { -1 };
-                    sign * (imm.abs() + 1) / 2 // We increase the jump length by making it 1 step longer
-                } else {
-                    imm / 2
-                };
-                */
-
                 let immediate = *imm;
                 // Emit the right encoding depending on the size of the immediate offset.
                 let encoding = if -128 < *imm && *imm < 127 {
@@ -828,41 +808,7 @@ impl ThumbInstruction {
                     // larger jumps.
                     thumb16::ConditionalBranchEncoding::new(*cond, immediate as i8)
                 };
-
-                // If the immediate is odd and we perform a backward jump, we insert
-                // a no-op before the branch to make the jump length even. If however
-                // we do a forward jump, we need to emit the noop after
-                /*
-                if *imm % 2 != 0 {
-                    if *imm < 0 {
-                        ThumbInstruction::NoOperationHint.emit_into(mem)?;
-                    } else {
-                        encoding.emit(mem)?;
-                        return ThumbInstruction::NoOperationHint.emit_into(mem);
-                    }
-                }
-                */
                 return encoding.emit(mem);
-
-                // If the immediate is even we don't want to introduce noops
-                // on the jump 'path' (i.e. in the instructions that are jumped over)
-                // However we still need to emit a noop as the first pass of the
-                // jit leaves two blank spots for the branch instruction so we
-                // need to fill both of them. It means that now we write the noop
-                // so that it isn't jumped over (i.e. doesn't affect jump length)
-                //
-                // To be precise, if we are doing a forward jump, we insert a noop
-                // before the instruction, and in case of a backward jump we
-                // insert the noop after
-                /*
-                if *imm < 0 {
-                    encoding.emit(mem)?;
-                    return ThumbInstruction::NoOperationHint.emit_into(mem);
-                } else {
-                    ThumbInstruction::NoOperationHint.emit_into(mem)?;
-                    return encoding.emit(mem);
-                }
-                */
             }
             ThumbInstruction::NoOperationHint => {
                 debug!("Emitting no-op hint at {:#x}", mem.offset);

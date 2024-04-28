@@ -275,12 +275,6 @@ impl JitCompiler {
                     insn_ptr += 1;
                     I::MoveImmediate { rd: dst, imm: insn.imm as i32}.emit_into(mem)?;
                 }
-                /*{
-                    insn_ptr += 1;
-                    let second_part = ebpf::get_insn(prog, insn_ptr).imm as u64;
-                    let imm = (insn.imm as u32) as u64 | second_part.wrapping_shl(32);
-                    self.emit_load_imm(mem, dst, imm as i64);
-                }*/
 
                 // BPF_LDX class
                 ebpf::LD_B_REG => I::LoadRegisterByteImmediate { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?,
@@ -804,12 +798,15 @@ impl JitCompiler {
             debug!("Jump start location: {:#x}", jump.memory_offset);
             // We add 1 here because a jump of 1 in eBPF skips one instruction and so
             // it actually jumps 2 down, similarly a jump of -9 goes up by 8 instructions
-            let target_offset = self.pc_locations[(jump.insn_ptr as isize + jump.offset) as usize];
+            let target_offset = self.pc_locations[(jump.insn_ptr as isize + jump.offset + 1) as usize];
             debug!("Jump target location: {:#x}", target_offset);
             debug!("eBPF Jump offset: ({}) {:#x}", jump.offset, jump.offset);
             // Offsets are in terms of number of bytes in the jit program memory buffer,
-            // since the base instruction is 2 bytes we divide by 2
-            let actual_offset = (target_offset as isize - jump.memory_offset as isize) / 2;
+            // since the base instruction is 2 bytes we divide by 2. We also need to decrease it by
+            // 1 as the offset should be relative to the current PC value which is the
+            // address of the instruction `jump.memory_offset` + 4. Note that 4 represents
+            // 2 standard length ARM instructions, so we decrement the offset by 2
+            let actual_offset = (target_offset as isize - jump.memory_offset as isize) / 2 - 2;
             debug!("ARM Jump offset: ({}) {:#x}", actual_offset, actual_offset);
 
             debug!("Writing instruction at offset: {:#x} ", jump.memory_offset);
