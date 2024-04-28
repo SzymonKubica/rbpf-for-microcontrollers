@@ -417,21 +417,27 @@ impl JitCompiler {
                     // 32 bits so that we can do a comparison on the lower 32 bits.
                     //
                     // Workaound: if an lsl is requested for 32, we emit a noop.
-                    if insn.imm == 32 {
-                        I::NoOperationHint.emit_into(mem)?;
-                    } else {
-                        I::LogicalShiftLeftImmediate { imm5: insn.imm as u8, rm: dst, rd: dst }.emit_into(mem)?;
-                    }
+                    //
+                    // Additional observation: it turs out that this also happens when
+                    // loading 16 bit numbers from memory. For instance, when loading
+                    // a u16 from memory the eBPF compiler emits:
+                    //  ldxh %r0,[%r10-2]
+                    //  lsh %r0,48
+                    //  arsh %r0,48
+                    //  Which aims to truncate the loaded number into 16 bits
+                    //  while preserving the sign. The problem is that
+                    //  our architecture (ARMv7) is only 32 bit, therefore lsh by 48
+                    //  places will effectively erase all contents of the register
+                    //  (it is only 32 bits long). Because of this in logical
+                    //  / arithmetic shift instructions we mod the shift value by
+                    //  32 so that the register never gets fully flushed
+                    I::LogicalShiftLeftImmediate { imm5: (insn.imm % 32) as u8, rm: dst, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::LSH32_REG | ebpf::LSH64_REG => {
                     I::LogicalShiftLeft { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::RSH32_IMM | ebpf::RSH64_IMM => {
-                    if insn.imm == 32 {
-                        I::NoOperationHint.emit_into(mem)?;
-                    } else {
-                        I::LogicalShiftRightImmediate { imm5: insn.imm as u8, rm: dst, rd: dst }.emit_into(mem)?;
-                    }
+                    I::LogicalShiftRightImmediate { imm5: (insn.imm % 32) as u8, rm: dst, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::RSH32_REG | ebpf::RSH64_REG => {
                     I::LogicalShiftRight { rm: src, rd: dst }.emit_into(mem)?;
@@ -453,7 +459,7 @@ impl JitCompiler {
                     I::MoveRegistersSpecial { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::ARSH32_IMM | ebpf::ARSH64_IMM => {
-                    I::ArithmeticShiftRightImmediate { imm5: insn.imm as u8, rm: src, rd: dst }.emit_into(mem)?;
+                    I::ArithmeticShiftRightImmediate { imm5: (insn.imm % 32) as u8, rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::ARSH32_REG | ebpf::ARSH64_REG => {
                     I::ArithmeticShiftRight { rm: src, rd: dst }.emit_into(mem)?;
@@ -798,7 +804,8 @@ impl JitCompiler {
             debug!("Jump start location: {:#x}", jump.memory_offset);
             // We add 1 here because a jump of 1 in eBPF skips one instruction and so
             // it actually jumps 2 down, similarly a jump of -9 goes up by 8 instructions
-            let target_offset = self.pc_locations[(jump.insn_ptr as isize + jump.offset + 1) as usize];
+            let target_offset =
+                self.pc_locations[(jump.insn_ptr as isize + jump.offset + 1) as usize];
             debug!("Jump target location: {:#x}", target_offset);
             debug!("eBPF Jump offset: ({}) {:#x}", jump.offset, jump.offset);
             // Offsets are in terms of number of bytes in the jit program memory buffer,
