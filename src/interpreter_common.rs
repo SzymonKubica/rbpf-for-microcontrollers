@@ -42,14 +42,14 @@ pub fn check_mem(
     let access_type = if is_load { "load" } else { "store" };
 
     if let Some(addr_end) = addr.checked_add(len as u64) {
-        debug!("Checking memory {}: {}", access_type, addr);
+        //debug!("Checking memory {}: {}", access_type, addr);
         let debug_section_print = |name, slice: &[u8]| {
-            debug!(
-                "{}: start={:#x}, len={:#x}",
-                name,
-                slice.as_ptr() as u64,
-                slice.len() as u64
-            )
+            //debug!(
+            //    "{}: start={:#x}, len={:#x}",
+            //    name,
+            //    slice.as_ptr() as u64,
+            //    slice.len() as u64
+            //)
         };
 
         let within_bounds = |region: &[u8], addr, addr_end| {
