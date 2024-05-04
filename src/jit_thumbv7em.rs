@@ -997,18 +997,6 @@ impl<'a> IndexMut<usize> for JitMemory<'a> {
     }
 }
 
-/*
-impl<'a> std::fmt::Debug for JitMemory<'a> {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), FormatterError> {
-        fmt.write_str("JIT contents: [")?;
-        fmt.write_str(" ] | ")?;
-        fmt.debug_struct("JIT memory")
-            .field("offset", &self.offset)
-            .finish()
-    }
-}
-*/
-
 fn error_32_bit_arch() -> Result<(), Error> {
     Err(Error::new(
         ErrorKind::Other,
