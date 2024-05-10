@@ -21,7 +21,7 @@
 //!   functions that are specified in the eBPF ISA.
 //!
 
-use crate::interpreter_common::{ElfSection, check_mem};
+use crate::interpreter_common::{check_mem, ElfSection};
 use crate::verifier::check_helpers;
 use crate::InterpreterVariant;
 use log::debug;
@@ -29,48 +29,6 @@ use stdlib::collections::{BTreeMap, Vec};
 use stdlib::{Error, ErrorKind};
 
 use ebpf;
-
-#[derive(Copy, Clone, Debug)]
-struct BytecodeHeader {
-    magic: u32,   /*Magic number */
-    version: u32, /*Version of the application */
-    flags: u32,
-    data_len: u32,      /*Length of the data section */
-    rodata_len: u32,    /*Length of the rodata section */
-    text_len: u32,      /*Length of the text section */
-    functions_len: u32, /*Number of functions available */
-}
-
-#[derive(Copy, Clone, Debug)]
-struct Program {
-    text_section: ElfSection,
-    data_section: ElfSection,
-    rodata_section: ElfSection,
-    prog_len: usize,
-}
-
-fn parse_header(prog: &[u8]) -> Program {
-    let header_size = 28;
-    unsafe {
-        let header = prog.as_ptr() as *const BytecodeHeader;
-
-        debug!("Bytecode Header: \n{:?}", *header);
-
-        let data_offset = header_size;
-        let rodata_offset = data_offset + (*header).data_len;
-        let text_offset = rodata_offset + (*header).rodata_len;
-
-        let program = Program {
-            text_section: ElfSection::new(text_offset, (*header).text_len),
-            data_section: ElfSection::new(data_offset, (*header).data_len),
-            rodata_section: ElfSection::new(rodata_offset, (*header).rodata_len),
-            prog_len: (*header).text_len as usize,
-        };
-
-        debug!("Program: \n{:?}", program);
-        program
-    }
-}
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
@@ -246,9 +204,10 @@ pub fn execute_program(
                 reg[_dst] = ((insn.imm as u32) as u64) + ((next_insn.imm as u64) << 32);
             }
 
-            // The custom LDDW* instructions emmitted by the Femto-Container
-            // gen_rbf script. Responsible for accessing .data and .rodata
-            // sections.
+            // The custom LDDW* instructions used by the Femto-Container versions
+            // of the bytecode. Responsible for accessing .data and .rodata
+            // sections. Will only be used in binaries that were preprocessed
+            // to be compatible with the Femto-Containers layout.
             // LDDWD_OPCODE = 0xB8 LDDWR_OPCODE = 0xD8
             ebpf::LDDWD_IMM => {
                 let next_insn = ebpf::get_insn(prog_text, insn_ptr);
@@ -682,36 +641,7 @@ pub fn execute_program(
             // Do not delegate the check to the verifier, since registered functions can be
             // changed after the program has been verified.
             ebpf::CALL => {
-                match insn.src {
-                    0 => {
-                        if let Some(function) = helpers.get(&(insn.imm as u32)) {
-                            reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
-                        } else {
-                            Err(Error::new(
-                                ErrorKind::Other,
-                                format!(
-                                    "Error: unknown helper function (id: {:#x})",
-                                    insn.imm as u32
-                                ),
-                            ))?;
-                        }
-                    }
-                    1 => {
-                        // Here the source register 1 indicates that we are making
-                        // a call relative to the current instruction pointer
-                        return_address_stack.push(insn_ptr as u64);
-                        insn_ptr = ((insn_ptr as i32 + insn.imm) as usize) as usize;
-                    }
-                    _ => {
-                        Err(Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "Error: invalid CALL src register value: (src: {})",
-                                insn.src as u32
-                            ),
-                        ))?;
-                    }
-                }
+
             }
             ebpf::TAIL_CALL => unimplemented!(),
             ebpf::EXIT => {

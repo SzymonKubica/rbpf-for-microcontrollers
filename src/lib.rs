@@ -94,7 +94,7 @@ mod jit_thumbv7em;
 mod thumbv7em;
 mod thumb_16bit_encoding;
 mod thumb_32bit_encoding;
-mod binary_layout;
+mod binary_layouts;
 
 pub use verifier::check_helpers;
 #[cfg(jit)]

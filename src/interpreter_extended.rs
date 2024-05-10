@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+// SDX-License-Identifier: (Apache-2.0 OR MIT)
 // Derived from uBPF <https://github.com/iovisor/ubpf>
 // Copyright 2015 Big Switch Networks, Inc
 //      (uBPF: VM architecture, parts of the interpreter, originally in C)
@@ -23,87 +23,6 @@ use stdlib::{Error, ErrorKind};
 use ebpf;
 
 use crate::interpreter_common::{check_mem, ElfSection};
-
-#[derive(Copy, Clone, Debug)]
-struct BytecodeHeader {
-    magic: u32,   /*Magic number */
-    version: u32, /*Version of the application */
-    flags: u32,
-    data_len: u32,        /*Length of the data section */
-    rodata_len: u32,      /*Length of the rodata section */
-    text_len: u32,        /*Length of the text section */
-    functions: u32,       /*Number of functions available */
-    relocated_calls: u32, /*Number of relocated function calls in the program */
-}
-
-#[derive(Copy, Clone, Debug)]
-struct FunctionRelocation {
-    instruction_offset: u32,
-    function_text_offset: u32,
-}
-
-struct Program {
-    text_section: ElfSection,
-    data_section: ElfSection,
-    rodata_section: ElfSection,
-    prog_len: usize,
-    relocated_calls: Vec<FunctionRelocation>,
-    allowed_helpers: Vec<u8>,
-}
-
-static FUNCTION_STRUCT_SIZE: u32 = 6;
-static RELOCATED_CALL_STRUCT_SIZE: u32 = 8;
-
-fn parse_header(prog: &[u8]) -> Program {
-    let header_size = 32;
-    unsafe {
-        let header = prog.as_ptr() as *const BytecodeHeader;
-
-        debug!("Header: \n{:?}", *header);
-
-        let text_offset = header_size + (*header).data_len + (*header).rodata_len;
-        let data_offset = header_size;
-        let rodata_offset = header_size + (*header).data_len;
-        let function_relocations_offset = header_size
-            + (*header).data_len
-            + (*header).rodata_len
-            + (*header).text_len
-            + (*header).functions * FUNCTION_STRUCT_SIZE;
-
-        let allowed_helpers_offset: u32 =
-            function_relocations_offset + (*header).relocated_calls * RELOCATED_CALL_STRUCT_SIZE;
-
-        let mut relocated_calls = Vec::new();
-        let function_relocations_data =
-            &prog[function_relocations_offset as usize..allowed_helpers_offset as usize];
-        debug!(
-            "Processing {} relocated calls...",
-            function_relocations_data.len() / 8
-        );
-        for i in 0..(function_relocations_data.len() / 8) {
-            // Each of the relocation structs is 8 bytes long
-            let reloc = function_relocations_data[i * 8 as usize..(i * 8 + 8) as usize].as_ptr()
-                as *const FunctionRelocation;
-            debug!("Relocation call found: {:?}", *reloc);
-            relocated_calls.push(*reloc.clone())
-        }
-
-        let mut allowed_helpers = Vec::new();
-        for byte in &prog[allowed_helpers_offset as usize..] {
-            allowed_helpers.push(*byte);
-        }
-        debug!("Allowed helpers: {:?}", allowed_helpers);
-
-        return Program {
-            text_section: ElfSection::new(text_offset, (*header).text_len),
-            data_section: ElfSection::new(data_offset, (*header).data_len),
-            rodata_section: ElfSection::new(rodata_offset, (*header).rodata_len),
-            prog_len: (*header).text_len as usize,
-            relocated_calls,
-            allowed_helpers,
-        };
-    }
-}
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
@@ -708,49 +627,6 @@ pub fn execute_program(
             // Do not delegate the check to the verifier, since registered functions can be
             // changed after the program has been verified.
             ebpf::CALL => {
-                match insn.src {
-                    0 => {
-                        // First we check if we have a custom relocation at this instruction
-                        if let Some(reloc) = program
-                            .relocated_calls
-                            .iter()
-                            .find(|r| r.instruction_offset / 8 == insn_ptr as u32 - 1)
-                        {
-                            // If we call a helper function we push the next instruction
-                            // into the return address stack and set the instruction
-                            // pointer to wherever the function lives
-                            return_address_stack.push(insn_ptr as u64);
-
-                            insn_ptr = (reloc.function_text_offset / 8) as usize;
-                        // Then we inspect if the immediate indicates a helper function
-                        } else if let Some(function) = helpers.get(&(insn.imm as u32)) {
-                            reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
-                        } else {
-                            Err(Error::new(
-                                ErrorKind::Other,
-                                format!(
-                                    "Error: unknown helper function (id: {:#x})",
-                                    insn.imm as u32
-                                ),
-                            ))?;
-                        }
-                    }
-                    1 => {
-                        // Here the source register 1 indicates that we are making
-                        // a call relative to the current instruction pointer
-                        return_address_stack.push(insn_ptr as u64);
-                        insn_ptr = ((insn_ptr as i32 + insn.imm) as usize) as usize;
-                    }
-                    _ => {
-                        Err(Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "Error: invalid CALL src register value: (src: {})",
-                                insn.src as u32
-                            ),
-                        ))?;
-                    }
-                }
             }
             ebpf::TAIL_CALL => unimplemented!(),
             ebpf::EXIT => {
