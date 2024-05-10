@@ -24,6 +24,7 @@
 
 use crate::ebpf::{self, Insn};
 use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use stdlib::Error;
 
 mod raw_elf_file_binary;

@@ -67,15 +67,14 @@ mod stdlib {
     pub use crate::without_std::*;
 }
 
-use binary_layouts::{
-    CallInstructionHandler, FemtoContainersBinary, LddwdrInstructionHandler, SectionAccessor,
-};
+use binary_layouts::{ExtendedHeaderBinary, FemtoContainersBinary, RawElfFileBinary};
 use byteorder::{ByteOrder, LittleEndian};
 pub use jit_thumbv7em::{JitCompiler, JitMemory};
 use stdlib::collections::BTreeMap;
 use stdlib::collections::{vec, Vec};
 use stdlib::u32;
 use stdlib::{Error, ErrorKind};
+use alloc::boxed::Box;
 
 #[cfg(std)]
 mod asm_parser;
@@ -89,11 +88,7 @@ pub mod ebpf;
 pub mod helpers;
 pub mod insn_builder;
 mod interpreter;
-mod interpreter_common;
-mod interpreter_extended;
-mod interpreter_femtocontainers_header;
 mod interpreter_generic;
-mod interpreter_raw_elf_file;
 mod jit_thumbv7em;
 mod thumb_16bit_encoding;
 mod thumb_32bit_encoding;
@@ -444,15 +439,9 @@ impl<'a> EbpfVmMbuff<'a> {
             );
         };
         let binary: Box<dyn binary_layouts::Binary> = match self.interpreter_variant {
-            InterpreterVariant::ExtendedHeader => {
-                Box::new(binary_layouts::ExtendedHeaderBinary::new(prog))
-            }
-            InterpreterVariant::RawObjectFile => {
-                Box::new(binary_layouts::RawElfFileBinary::new(prog)?)
-            }
-            InterpreterVariant::FemtoContainersHeader => {
-                Box::new(binary_layouts::FemtoContainersBinary::new(prog))
-            }
+            InterpreterVariant::ExtendedHeader => Box::new(ExtendedHeaderBinary::new(prog)),
+            InterpreterVariant::RawObjectFile => Box::new(RawElfFileBinary::new(prog)?),
+            InterpreterVariant::FemtoContainersHeader => Box::new(FemtoContainersBinary::new(prog)),
             _ => unreachable!(),
         };
         interpreter_generic::execute_program(

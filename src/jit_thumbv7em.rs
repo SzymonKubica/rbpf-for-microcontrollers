@@ -17,7 +17,7 @@ use stdlib::{Error, ErrorKind, String};
 use ebpf;
 use thumbv7em::*;
 
-use crate::binary_layout::{RawElfFileBinary, SectionAccessor};
+use crate::binary_layouts::{RawElfFileBinary, SectionAccessor};
 use crate::InterpreterVariant;
 
 /// The jit-compiled code can then be called as a function

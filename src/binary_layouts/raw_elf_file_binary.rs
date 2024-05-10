@@ -1,5 +1,6 @@
 use crate::ebpf::{self, Insn};
 use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use stdlib::{Error, ErrorKind};
 
 use super::{CallInstructionHandler, SectionAccessor, LddwdrInstructionHandler, Binary};

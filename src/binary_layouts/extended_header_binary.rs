@@ -2,6 +2,7 @@ use log::debug;
 
 use super::{common::ElfSection, CallInstructionHandler, SectionAccessor, Binary, LddwdrInstructionHandler};
 use stdlib::{Error, ErrorKind};
+use alloc::vec::Vec;
 
 /// Extended version of the metadata header used by Femto-Containers. This one
 /// contains information regarding the relocated calls (for supporting non-inlined,

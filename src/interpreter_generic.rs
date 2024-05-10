@@ -7,26 +7,26 @@
 // Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
 //      (Adding support for different binary file layouts and pc-relative calls)
 
+use alloc::boxed::Box;
+use alloc::string::ToString;
+use log::debug;
 use stdlib::collections::{BTreeMap, Vec};
 use stdlib::{Error, ErrorKind};
 
 use ebpf;
 
-use crate::binary_layouts::{
-    CallInstructionHandler, LddwdrInstructionHandler, SectionAccessor, Binary,
-};
+use crate::binary_layouts::Binary;
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
-pub fn execute_program(
-    prog: &[u8],
+pub fn execute_program<'a>(
+    prog: &'a [u8],
     mem: &[u8],
     mbuff: &[u8],
     helpers: &BTreeMap<u32, ebpf::Helper>,
     allowed_memory_regions: Vec<(u64, u64)>,
-    binary: Box<dyn Binary>,
-) -> Result<u64, Error>
-{
+    binary: Box<dyn Binary + 'a>,
+) -> Result<u64, Error> {
     const U32MAX: u64 = u32::MAX as u64;
     const SHIFT_MASK_32: u32 = 0x1f;
     const SHIFT_MASK_64: u64 = 0x3f;
@@ -183,11 +183,25 @@ pub fn execute_program(
             // to be compatible with the Femto-Containers layout.
             // LDDWD_OPCODE = 0xB8 LDDWR_OPCODE = 0xD8
             ebpf::LDDWD_IMM => {
-                binary.handle_lddwd_instruction(prog, insn, _dst, &mut insn_ptr, text_section, &mut reg)?;
+                binary.handle_lddwd_instruction(
+                    prog,
+                    insn,
+                    _dst,
+                    &mut insn_ptr,
+                    text_section,
+                    &mut reg,
+                )?;
             }
 
             ebpf::LDDWR_IMM => {
-                binary.handle_lddwr_instruction(prog, insn, _dst, &mut insn_ptr, text_section, &mut reg)?;
+                binary.handle_lddwr_instruction(
+                    prog,
+                    insn,
+                    _dst,
+                    &mut insn_ptr,
+                    text_section,
+                    &mut reg,
+                )?;
             }
 
             // BPF_LDX class
