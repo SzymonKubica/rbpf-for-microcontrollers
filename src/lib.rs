@@ -67,17 +67,21 @@ mod stdlib {
     pub use crate::without_std::*;
 }
 
+use binary_layouts::{
+    CallInstructionHandler, FemtoContainersBinary, LddwdrInstructionHandler, SectionAccessor,
+};
 use byteorder::{ByteOrder, LittleEndian};
+pub use jit_thumbv7em::{JitCompiler, JitMemory};
 use stdlib::collections::BTreeMap;
-use stdlib::collections::{Vec, vec};
+use stdlib::collections::{vec, Vec};
 use stdlib::u32;
 use stdlib::{Error, ErrorKind};
-pub use jit_thumbv7em::{JitCompiler, JitMemory};
 
 #[cfg(std)]
 mod asm_parser;
 #[cfg(std)]
 pub mod assembler;
+mod binary_layouts;
 #[cfg(feature = "cranelift")]
 mod cranelift;
 pub mod disassembler;
@@ -85,16 +89,15 @@ pub mod ebpf;
 pub mod helpers;
 pub mod insn_builder;
 mod interpreter;
+mod interpreter_common;
 mod interpreter_extended;
 mod interpreter_femtocontainers_header;
-mod interpreter_raw_elf_file;
-mod interpreter_common;
 mod interpreter_generic;
+mod interpreter_raw_elf_file;
 mod jit_thumbv7em;
-mod thumbv7em;
 mod thumb_16bit_encoding;
 mod thumb_32bit_encoding;
-mod binary_layouts;
+mod thumbv7em;
 
 pub use verifier::check_helpers;
 #[cfg(jit)]
@@ -103,7 +106,7 @@ mod verifier;
 
 /// Specifies the available variants of the interpreters that are used to execute
 /// the eBPF programs.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InterpreterVariant {
     /// The default interpreter used by rbpf. It expects that the program only contains
     /// the .text section from the compiled ELF file and that the first instruction
@@ -423,38 +426,43 @@ impl<'a> EbpfVmMbuff<'a> {
         mbuff: &[u8],
         allowed_memory_regions: Vec<(u64, u64)>,
     ) -> Result<u64, Error> {
-        match self.interpreter_variant {
-            InterpreterVariant::Default => interpreter::execute_program(
+        let prog = match self.prog {
+            Some(prog) => prog,
+            None => Err(Error::new(
+                ErrorKind::Other,
+                "Error: No program set, call prog_set() to load one",
+            ))?,
+        };
+
+        if self.interpreter_variant == InterpreterVariant::Default {
+            return interpreter::execute_program(
                 self.prog,
                 mem,
                 mbuff,
                 &self.helpers,
                 allowed_memory_regions,
-            ),
-            InterpreterVariant::FemtoContainersHeader => {
-                interpreter_femtocontainers_header::execute_program(
-                    self.prog,
-                    mem,
-                    mbuff,
-                    &self.helpers,
-                    allowed_memory_regions,
-                )
+            );
+        };
+        let binary: Box<dyn binary_layouts::Binary> = match self.interpreter_variant {
+            InterpreterVariant::ExtendedHeader => {
+                Box::new(binary_layouts::ExtendedHeaderBinary::new(prog))
             }
-            InterpreterVariant::ExtendedHeader => interpreter_extended::execute_program(
-                self.prog,
-                mem,
-                mbuff,
-                &self.helpers,
-                allowed_memory_regions,
-            ),
-            InterpreterVariant::RawObjectFile => interpreter_raw_elf_file::execute_program(
-                self.prog,
-                mem,
-                mbuff,
-                &self.helpers,
-                allowed_memory_regions,
-            ),
-        }
+            InterpreterVariant::RawObjectFile => {
+                Box::new(binary_layouts::RawElfFileBinary::new(prog)?)
+            }
+            InterpreterVariant::FemtoContainersHeader => {
+                Box::new(binary_layouts::FemtoContainersBinary::new(prog))
+            }
+            _ => unreachable!(),
+        };
+        interpreter_generic::execute_program(
+            prog,
+            mem,
+            mbuff,
+            &self.helpers,
+            allowed_memory_regions,
+            binary,
+        )
     }
 
     /// JIT-compile the loaded program. No argument required for this.

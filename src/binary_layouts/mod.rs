@@ -34,6 +34,9 @@ pub use self::femtocontainers_binary::{FemtoContainersBinary, LddwdrInstructionH
 
 mod common;
 mod extended_header_binary;
+pub use self::extended_header_binary::ExtendedHeaderBinary;
+
+pub trait Binary: SectionAccessor + CallInstructionHandler + LddwdrInstructionHandler {}
 
 /// Implementations of this trait should provide access to the different sections
 /// of the eBPF binary file. The idea is that the structs that we implement

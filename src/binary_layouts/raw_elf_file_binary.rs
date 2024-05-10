@@ -2,7 +2,7 @@ use crate::ebpf::{self, Insn};
 use alloc::collections::BTreeMap;
 use stdlib::{Error, ErrorKind};
 
-use super::{CallInstructionHandler, SectionAccessor, LddwdrInstructionHandler};
+use super::{CallInstructionHandler, SectionAccessor, LddwdrInstructionHandler, Binary};
 
 /// Responsible for parsing binaries that are raw ELF files that have been stripped
 /// off the debug information and that have already been processed by resolving
@@ -108,3 +108,4 @@ impl CallInstructionHandler for RawElfFileBinary<'_> {
 }
 
 impl LddwdrInstructionHandler for RawElfFileBinary<'_> {}
+impl Binary for RawElfFileBinary<'_> {}

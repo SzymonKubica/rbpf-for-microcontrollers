@@ -1,6 +1,6 @@
 use log::debug;
 
-use super::{common::ElfSection, CallInstructionHandler, SectionAccessor};
+use super::{common::ElfSection, CallInstructionHandler, SectionAccessor, Binary, LddwdrInstructionHandler};
 use stdlib::{Error, ErrorKind};
 
 /// Extended version of the metadata header used by Femto-Containers. This one
@@ -173,3 +173,6 @@ impl CallInstructionHandler for ExtendedHeaderBinary {
         Ok(())
     }
 }
+
+impl LddwdrInstructionHandler for ExtendedHeaderBinary {}
+impl Binary for ExtendedHeaderBinary {}

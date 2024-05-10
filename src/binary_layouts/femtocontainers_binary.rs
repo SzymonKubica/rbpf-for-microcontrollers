@@ -5,7 +5,7 @@ use stdlib::{Error, ErrorKind};
 use crate::ebpf::{self, Insn};
 
 use super::common::ElfSection;
-use super::{CallInstructionHandler, SectionAccessor};
+use super::{CallInstructionHandler, SectionAccessor, Binary};
 
 /// Header present at the start of the Femto-Containers binary.
 #[derive(Copy, Clone, Debug)]
@@ -199,3 +199,5 @@ impl LddwdrInstructionHandler for FemtoContainersBinary {
         Ok(())
     }
 }
+
+impl Binary for FemtoContainersBinary {}

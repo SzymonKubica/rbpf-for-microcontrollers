@@ -13,33 +13,24 @@ use stdlib::{Error, ErrorKind};
 use ebpf;
 
 use crate::binary_layouts::{
-    CallInstructionHandler, LddwdrInstructionHandler, RawElfFileBinary, SectionAccessor,
+    CallInstructionHandler, LddwdrInstructionHandler, SectionAccessor, Binary,
 };
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
-pub fn execute_program<T>(
-    prog_: Option<&[u8]>,
+pub fn execute_program(
+    prog: &[u8],
     mem: &[u8],
     mbuff: &[u8],
     helpers: &BTreeMap<u32, ebpf::Helper>,
     allowed_memory_regions: Vec<(u64, u64)>,
-    binary: T,
+    binary: Box<dyn Binary>,
 ) -> Result<u64, Error>
-where
-    T: SectionAccessor + CallInstructionHandler + LddwdrInstructionHandler,
 {
     const U32MAX: u64 = u32::MAX as u64;
     const SHIFT_MASK_32: u32 = 0x1f;
     const SHIFT_MASK_64: u64 = 0x3f;
 
-    let prog = match prog_ {
-        Some(prog) => prog,
-        None => Err(Error::new(
-            ErrorKind::Other,
-            "Error: No program set, call prog_set() to load one",
-        ))?,
-    };
     let stack = vec![0u8; ebpf::STACK_SIZE];
 
     // R1 points to beginning of memory area, R10 to stack
