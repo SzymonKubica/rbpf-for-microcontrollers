@@ -4,23 +4,26 @@
 //      (uBPF: VM architecture, parts of the interpreter, originally in C)
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
+// Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
+//      (Adding support for different binary file layouts and pc-relative calls)
 
 use stdlib::collections::{BTreeMap, Vec};
-use stdlib::{Error, ErrorKind, String, ToString};
+use stdlib::{Error, ErrorKind};
 
 use ebpf;
 
-use crate::binary_layout::{RawElfFileBinary, SectionAccessor};
+use crate::binary_layout::{CallInstructionHandler, RawElfFileBinary, SectionAccessor};
 use crate::interpreter_common::check_mem;
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
-pub fn execute_program(
+pub fn execute_program<T: SectionAccessor + CallInstructionHandler> (
     prog_: Option<&[u8]>,
     mem: &[u8],
     mbuff: &[u8],
     helpers: &BTreeMap<u32, ebpf::Helper>,
     allowed_memory_regions: Vec<(u64, u64)>,
+    interpreter_variant: T,
 ) -> Result<u64, Error> {
     const U32MAX: u64 = u32::MAX as u64;
     const SHIFT_MASK_32: u32 = 0x1f;
@@ -91,6 +94,9 @@ pub fn execute_program(
         )
     };
 
+    // Return address stack for pc-relative function calls. Every time we such
+    // call, we push the current pc onto the stack and then pop from it when
+    // we encounter an EXIT instruction.
     let mut return_address_stack = vec![];
 
     // Loop on instructions
@@ -587,49 +593,14 @@ pub fn execute_program(
                 }
             }
 
-            // Do not delegate the check to the verifier, since registered functions can be
-            // changed after the program has been verified.
-            ebpf::CALL => {
-                // The source register determines if we have a helper call or a PC-relative call.
-                match insn.src {
-                    0 => {
-                        if let Some(function) = helpers.get(&(insn.imm as u32)) {
-                            reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
-                        } else {
-                            Err(Error::new(
-                                ErrorKind::Other,
-                                format!(
-                                    "Error: unknown helper function (id: {:#x})",
-                                    insn.imm as u32
-                                ),
-                            ))?;
-                        }
-                    }
-                    1 => {
-                        // Here the source register 1 indicates that we are making
-                        // a call relative to the current instruction pointer
-                        return_address_stack.push(insn_ptr as u64);
-                        insn_ptr = ((insn_ptr as i32 + insn.imm) as usize) as usize;
-                    }
-                    3 => {
-                        // This is a hacky implementation of calling functions
-                        // using their actual memory address (not specified in the
-                        // eBPF standard). Those calls are denoted by value 3
-                        // being present in the source register. The reason we
-                        // need those is when we want to have non-inlined, non-static
-                        // functions defined inside of eBPF programs. Calls to those
-                        // functions aren't compiled as PC-relative calls and
-                        // they need manual relocation resolution
-
-                        return_address_stack.push(insn_ptr as u64);
-                        let function_address = insn.imm as u32;
-                        let program_address = prog.as_ptr() as u32;
-                        let function_offset = function_address - program_address as u32;
-                        insn_ptr = (function_offset / 8) as usize;
-                    }
-                    _ => unreachable!(),
-                };
-            }
+            ebpf::CALL => binary.handle_call_instruction(
+                prog,
+                &mut insn_ptr,
+                insn,
+                &mut reg,
+                helpers,
+                &mut return_address_stack,
+            )?,
             ebpf::TAIL_CALL => unimplemented!(),
             ebpf::EXIT => {
                 if return_address_stack.is_empty() {

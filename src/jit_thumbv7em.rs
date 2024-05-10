@@ -17,6 +17,7 @@ use stdlib::{Error, ErrorKind, String};
 use ebpf;
 use thumbv7em::*;
 
+use crate::binary_layout::{RawElfFileBinary, SectionAccessor};
 use crate::InterpreterVariant;
 
 /// The jit-compiled code can then be called as a function
@@ -204,16 +205,8 @@ impl JitCompiler {
             InterpreterVariant::FemtoContainersHeader => prog,
             InterpreterVariant::ExtendedHeader => prog,
             InterpreterVariant::RawObjectFile => {
-                let Ok(binary) = goblin::elf::Elf::parse(prog) else {
-                    Err(Error::new(ErrorKind::Other, "Failed to parse ELF binary"))?
-                };
-
-                let Ok(text_section) =
-                    crate::interpreter_raw_elf_file::extract_section(".text", &binary, prog)
-                else {
-                    Err(Error::new(ErrorKind::Other, ".text section not found"))?
-                };
-                text_section
+                let binary = RawElfFileBinary::new(prog)?;
+                binary.get_text_section(prog)?
             }
         };
 

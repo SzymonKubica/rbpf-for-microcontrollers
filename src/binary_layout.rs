@@ -22,17 +22,18 @@
 //!   located in the loaded program buffer.
 //! - handling funtion calls and load/store instruction is layout specific
 
-use crate::ebpf::Insn;
+use crate::ebpf::{self, Insn};
+use alloc::collections::BTreeMap;
 use stdlib::{Error, ErrorKind};
 
 /// Implementations of this trait should provide access to the different sections
 /// of the eBPF binary file. The idea is that the structs that we implement
 /// for defining behaviour for different binary layouts listed above implement
 /// and can be swapped in and out in the generic interpreter.
-pub trait SectionAccessor<'a> {
-    fn get_text_section(&'a self) -> Result<&'a [u8], Error>;
-    fn get_data_section(&'a self) -> Result<&'a [u8], Error>;
-    fn get_rodata_section(&'a self) -> Result<&'a [u8], Error>;
+pub trait SectionAccessor {
+    fn get_text_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error>;
+    fn get_data_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error>;
+    fn get_rodata_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error>;
 }
 
 /// Different binary layouts deal differently with function calls. For instance,
@@ -44,37 +45,38 @@ pub trait SectionAccessor<'a> {
 pub trait CallInstructionHandler {
     fn handle_call_instruction(
         &self,
-        insn_ptr: usize,
+        program: &[u8],
+        insn_ptr: &mut usize,
         insn: Insn,
-        registers: &mut [u64],
+        reg: &mut [u64],
+        helpers: &BTreeMap<u32, ebpf::Helper>,
+        return_address_stack: &mut Vec<usize>,
     ) -> Result<(), Error>;
 }
 
-/// When overriding the interpreter behaviour for CALL instructions, we also need
-/// to override the exit, because an exit from a subroutine should jump back to
-/// the call site instead of terminating the execution.
-pub trait ExitInstructionHandler {
-    fn handle_exit_instruction(
-        &self,
-        insn_ptr: usize,
-        insn: Insn,
-        registers: &mut [u64],
-    ) -> Result<Option<u64>, Error>;
-}
-
 pub struct RawElfFileBinary<'a> {
-    binary: &'a goblin::elf::Elf<'a>,
-    program: &'a [u8],
+    /// The parsed ELF binary used for looking up bytecode sections
+    binary: goblin::elf::Elf<'a>,
 }
 
 impl<'a> RawElfFileBinary<'a> {
-    fn extract_section(&self, section_name: &'static str) -> Result<&'a [u8], Error> {
+    pub fn new(program: &'a [u8]) -> Result<RawElfFileBinary<'a>, Error> {
+        let Ok(binary) = goblin::elf::Elf::parse(program) else {
+            Err(Error::new(ErrorKind::Other, "Failed to parse ELF binary"))?
+        };
+        Ok(Self { binary })
+    }
+    fn extract_section<'b>(
+        &self,
+        section_name: &'static str,
+        program: &'b [u8],
+    ) -> Result<&'b [u8], Error> {
         for section in &self.binary.section_headers {
             if let Some(name) = self.binary.shdr_strtab.get_at(section.sh_name) {
                 if name == section_name {
                     let section_start = section.sh_offset as usize;
                     let section_end = (section.sh_offset + section.sh_size) as usize;
-                    return Ok(&self.program[section_start..section_end]);
+                    return Ok(&program[section_start..section_end]);
                 }
             }
         }
@@ -85,14 +87,69 @@ impl<'a> RawElfFileBinary<'a> {
     }
 }
 
-impl<'a> SectionAccessor<'a> for RawElfFileBinary<'a> {
-    fn get_text_section(&self) -> Result<&[u8], Error> {
-        self.extract_section(".text")
+impl<'a> SectionAccessor for RawElfFileBinary<'a> {
+    fn get_text_section<'b>(&self, program: &'b [u8]) -> Result<&'b [u8], Error> {
+        self.extract_section(".text", &program)
     }
-    fn get_data_section(&self) -> Result<&[u8], Error> {
-        self.extract_section(".data")
+    fn get_data_section<'b>(&self, program: &'b [u8]) -> Result<&'b [u8], Error> {
+        self.extract_section(".data", &program)
     }
-    fn get_rodata_section(&self) -> Result<&[u8], Error> {
-        self.extract_section(".rodata")
+    fn get_rodata_section<'b>(&self, program: &'b [u8]) -> Result<&'b [u8], Error> {
+        self.extract_section(".rodata", &program)
+    }
+}
+
+impl CallInstructionHandler for RawElfFileBinary<'_> {
+    fn handle_call_instruction(
+        &self,
+        program: &[u8],
+        insn_ptr: &mut usize,
+        insn: Insn,
+        reg: &mut [u64],
+        helpers: &BTreeMap<u32, ebpf::Helper>,
+        return_address_stack: &mut Vec<usize>,
+    ) -> Result<(), Error> {
+        // The source register determines if we have a helper call or a PC-relative call.
+        match insn.src {
+            0 => {
+                // Do not delegate the check to the verifier, since registered functions can be
+                // changed after the program has been verified.
+                if let Some(function) = helpers.get(&(insn.imm as u32)) {
+                    reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
+                } else {
+                    Err(Error::new(
+                        ErrorKind::Other,
+                        format!(
+                            "Error: unknown helper function (id: {:#x})",
+                            insn.imm as u32
+                        ),
+                    ))?;
+                }
+            }
+            1 => {
+                // Here the source register 1 indicates that we are making
+                // a call relative to the current instruction pointer
+                return_address_stack.push(*insn_ptr);
+                *insn_ptr = ((*insn_ptr as i32 + insn.imm) as usize) as usize;
+            }
+            3 => {
+                // This is a hacky implementation of calling functions
+                // using their actual memory address (not specified in the
+                // eBPF standard). Those calls are denoted by value 3
+                // being present in the source register. The reason we
+                // need those is when we want to have non-inlined, non-static
+                // functions defined inside of eBPF programs. Calls to those
+                // functions aren't compiled as PC-relative calls and
+                // they need manual relocation resolution
+
+                return_address_stack.push(*insn_ptr);
+                let function_address = insn.imm as u32;
+                let program_address = program.as_ptr() as u32;
+                let function_offset = function_address - program_address as u32;
+                *insn_ptr = (function_offset / 8) as usize;
+            }
+            _ => unreachable!(),
+        }
+        Ok(())
     }
 }
