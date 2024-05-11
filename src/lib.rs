@@ -220,10 +220,6 @@ impl<'a> EbpfVmMbuff<'a> {
         prog: Option<&'a [u8]>,
         interpreter_variant: InterpreterVariant,
     ) -> Result<EbpfVmMbuff<'a>, Error> {
-        if let Some(prog) = prog {
-            verifier::check(prog, interpreter_variant)?;
-        }
-
         // We need to dynamically define the verifier in this way as the
         // closures aren't allowed to capture the interpreter variant from the
         // environment.
@@ -278,6 +274,18 @@ impl<'a> EbpfVmMbuff<'a> {
         self.prog = Some(prog);
         Ok(())
     }
+
+    /// Allows for verifying the program that is already loaded into the virtual machine.
+    pub fn verify_loaded_program(&self) -> Result<(), Error> {
+        (self.verifier)(self.prog.unwrap())
+    }
+
+    /// Allows for verifying the program that is already loaded into the VM only
+    /// calls the allowed helper functions
+    pub fn verify_helper_calls(&self, helper_idxs: &[u32], interpreter_variant: InterpreterVariant)-> Result<(), Error> {
+        check_helpers(self.prog.unwrap(), helper_idxs, interpreter_variant)
+    }
+
 
     /// Set a new verifier function. The function should return an `Error` if the program should be
     /// rejected by the virtual machine. If a program has been loaded to the VM already, the
