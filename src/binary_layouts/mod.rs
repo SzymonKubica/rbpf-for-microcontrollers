@@ -37,6 +37,9 @@ mod common;
 mod extended_header_binary;
 pub use self::extended_header_binary::ExtendedHeaderBinary;
 
+mod text_section_only_binary;
+pub use self::text_section_only_binary::TextSectionOnlyBinary;
+
 pub trait Binary: SectionAccessor + CallInstructionHandler + LddwdrInstructionHandler {}
 
 /// Implementations of this trait should provide access to the different sections

@@ -7,17 +7,25 @@
 // Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
 //      (Adaptation for ARM thumbv7em architecture running on ARM Cortex M4)
 
+use alloc::string::ToString;
+use alloc::boxed::Box;
+use core::cell::RefCell;
 use core::mem;
 use core::ops::{Index, IndexMut};
-use log::debug;
+use goblin::container::{Container, Endian};
+use goblin::elf::{Elf, Reloc};
+use log::{debug, error};
 use stdlib::collections::BTreeMap as HashMap;
 use stdlib::collections::Vec;
 use stdlib::{Error, ErrorKind, String};
 
+
 use ebpf;
 use thumbv7em::*;
 
-use crate::binary_layouts::{RawElfFileBinary, SectionAccessor};
+use crate::binary_layouts::{
+    Binary, ExtendedHeaderBinary, FemtoContainersBinary, RawElfFileBinary, TextSectionOnlyBinary,
+};
 use crate::InterpreterVariant;
 
 /// The jit-compiled code can then be called as a function
@@ -139,14 +147,45 @@ impl JitCompiler {
             interpreter_variant: interpreter,
         }
     }
-    pub fn jit_compile(
+    fn jit_compile(
         &mut self,
         mem: &mut JitMemory,
-        prog: &[u8],
+        prog: &mut [u8],
         use_mbuff: bool,
         update_data_ptr: bool, // This isn't used by my version of the jit.
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
+        // Depending on the binary file layout the pointer to the first instruction
+        // is located in different places.
+        //
+        let prog = RefCell::new(prog);
+        let prog_read_only = prog.borrow();
+        let binary: Box<dyn Binary> = match self.interpreter_variant {
+            InterpreterVariant::Default => Box::new(TextSectionOnlyBinary {}),
+            InterpreterVariant::FemtoContainersHeader => Box::new(FemtoContainersBinary::new(&prog_read_only)),
+            InterpreterVariant::ExtendedHeader => Box::new(ExtendedHeaderBinary::new(&prog_read_only)),
+            InterpreterVariant::RawObjectFile => Box::new(RawElfFileBinary::new(&prog_read_only)?),
+        };
+
+        // We need to write the .data and .rodata sections at the start of the
+        // program and store pointers to them, so that we can perform relocations
+        // accordingly.
+
+        let mut text = binary.get_text_section(&prog_read_only)?;
+        let data_section = binary.get_data_section(&prog_read_only).unwrap_or(&[]);
+        let rodata_section = binary.get_rodata_section(&prog_read_only).unwrap_or(&[]);
+        let data_offset = 0;
+        let rodata_offset = data_section.len();
+        mem.contents[..data_section.len()].copy_from_slice(data_section);
+        mem.contents[rodata_offset..rodata_section.len()].copy_from_slice(rodata_section);
+        mem.offset += data_section.len() + rodata_section.len();
+
+        let data_addr = mem.contents.as_ptr() as usize + data_offset;
+        let rodata_addr = mem.contents.as_ptr() as usize + rodata_offset;
+
+        let mut prog_mut = prog.borrow_mut();
+        resolve_data_rodata_relocations(&mut prog_mut, data_addr, rodata_addr);
+
         let callee_saved_regs = vec![R4, R5, R6, R7, R8, R10, R11, LR];
         I::PushMultipleRegisters {
             registers: callee_saved_regs.clone(),
@@ -196,23 +235,11 @@ impl JitCompiler {
         I::SubtractImmediateFromSP { imm: offset }.emit_into(mem)?;
         I::SubtractImmediateFromSP { imm: offset }.emit_into(mem)?;
 
-        self.pc_locations = vec![0; prog.len() / ebpf::INSN_SIZE + 1];
-
-        // Depending on the binary file layout the pointer to the first instruction
-        // is located in different places.
-        let prog = match self.interpreter_variant {
-            InterpreterVariant::Default => prog,
-            InterpreterVariant::FemtoContainersHeader => prog,
-            InterpreterVariant::ExtendedHeader => prog,
-            InterpreterVariant::RawObjectFile => {
-                let binary = RawElfFileBinary::new(prog)?;
-                binary.get_text_section(prog)?
-            }
-        };
+        self.pc_locations = vec![0; text.len() / ebpf::INSN_SIZE + 1];
 
         let mut insn_ptr: usize = 0;
-        while insn_ptr * ebpf::INSN_SIZE < prog.len() {
-            let insn = ebpf::get_insn(prog, insn_ptr);
+        while insn_ptr * ebpf::INSN_SIZE < text.len() {
+            let insn = ebpf::get_insn(text, insn_ptr);
 
             self.pc_locations[insn_ptr] = mem.offset;
 
@@ -229,34 +256,14 @@ impl JitCompiler {
                 // that has been made available to the program. This is done by
                 // storing the pointer to that memory in R10 and keeping it there.
                 // R10 is a constant pointer to mem.
-                ebpf::LD_ABS_B => todo!(), //self.emit_load(mem, OperandSize::S8, R10, R0, insn.imm),
-                ebpf::LD_ABS_H => todo!(), //self.emit_load(mem, OperandSize::S16, R10, R0, insn.imm),
-                ebpf::LD_ABS_W => todo!(), //self.emit_load(mem, OperandSize::S32, R10, R0, insn.imm),
-                ebpf::LD_ABS_DW => todo!(), //self.emit_load(mem, OperandSize::S64, R10, R0, insn.imm),
+                ebpf::LD_ABS_B => todo!(),
+                ebpf::LD_ABS_H => todo!(),
+                ebpf::LD_ABS_W => todo!(),
+                ebpf::LD_ABS_DW => todo!(),
                 ebpf::LD_IND_B => todo!(),
-                /*{
-                    self.emit_mov(mem, R10, R11); // load mem into R11
-                    self.emit_alu64(mem, 0x01, src, R11); // add src to R11
-                    self.emit_load(mem, OperandSize::S8, R11, R0, insn.imm); // ld R0, mem[src+imm]
-                }*/
                 ebpf::LD_IND_H => todo!(),
-                /*{
-                    self.emit_mov(mem, R10, R11); // load mem into R11
-                    self.emit_alu64(mem, 0x01, src, R11); // add src to R11
-                    self.emit_load(mem, OperandSize::S16, R11, R0, insn.imm); // ld R0, mem[src+imm]
-                }*/
                 ebpf::LD_IND_W => todo!(),
-                /*{
-                    self.emit_mov(mem, R10, R11); // load mem into R11
-                    self.emit_alu64(mem, 0x01, src, R11); // add src to R11
-                    self.emit_load(mem, OperandSize::S32, R11, R0, insn.imm); // ld R0, mem[src+imm]
-                }*/
                 ebpf::LD_IND_DW => todo!(),
-                /*{
-                    self.emit_mov(mem, R10, R11); // load mem into R11
-                    self.emit_alu64(mem, 0x01, src, R11); // add src to R11
-                    self.emit_load(mem, OperandSize::S64, R11, R0, insn.imm); // ld R0, mem[src+imm]
-                }*/
                 ebpf::LD_DW_IMM => {
                     // Here in case of lddw, even though eBPF specifies a load of
                     // a 64 bit immediate, we cannot do this as our architecture is only 32 bit
@@ -417,13 +424,13 @@ impl JitCompiler {
                     //  ldxh %r0,[%r10-2]
                     //  lsh %r0,48
                     //  arsh %r0,48
-                    //  Which aims to truncate the loaded number into 16 bits
-                    //  while preserving the sign. The problem is that
-                    //  our architecture (ARMv7) is only 32 bit, therefore lsh by 48
-                    //  places will effectively erase all contents of the register
-                    //  (it is only 32 bits long). Because of this in logical
-                    //  / arithmetic shift instructions we mod the shift value by
-                    //  32 so that the register never gets fully flushed
+                    // Which aims to truncate the loaded number into 16 bits
+                    // while preserving the sign. The problem is that
+                    // our architecture (ARMv7) is only 32 bit, therefore lsh by 48
+                    // places will effectively erase all contents of the register
+                    // (it is only 32 bits long). Because of this in logical
+                    // / arithmetic shift instructions we mod the shift value by
+                    // 32 so that the register never gets fully flushed
                     I::LogicalShiftLeftImmediate { imm5: (insn.imm % 32) as u8, rm: dst, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::LSH32_REG | ebpf::LSH64_REG => {
@@ -719,7 +726,7 @@ impl JitCompiler {
                     unimplemented!()
                 }
                 ebpf::EXIT => {
-                    if insn_ptr != prog.len() / ebpf::INSN_SIZE - 1 {
+                    if insn_ptr != text.len() / ebpf::INSN_SIZE - 1 {
                         I::BranchAndExchange { rm: LR }.emit_into(mem)?;
                     };
                 }
@@ -937,7 +944,7 @@ impl<'a> JitMemory<'a> {
     /// ```
     /// And then passing a reference to the contents of that struct to this function.
     pub fn new(
-        prog: &[u8],
+        prog: &mut [u8],
         jit_memory_buff: &'a mut [u8],
         helpers: &HashMap<u32, ebpf::Helper>,
         use_mbuff: bool,
@@ -962,6 +969,21 @@ impl<'a> JitMemory<'a> {
     /// CPU that it needs to be run in Thumb mode [see here](https://developer.arm.com/documentation/dui0471/m/interworking-arm-and-thumb/pointers-to-functions-in-thumb-state)
     pub fn get_prog(&self) -> MachineCode {
         let mut prog_ptr: u32 = self.contents.as_ptr() as u32;
+        // We need to set the LSB thumb bit.
+        prog_ptr = prog_ptr | 0x1;
+        self.log_program_contents();
+        unsafe { mem::transmute(prog_ptr as *mut u32) }
+    }
+
+    /// Allows for transmuting a previously jit-compiled program into a function.
+    pub fn get_prog_from_slice(jit_prog: &[u8]) -> MachineCode {
+        let mut prog_ptr: u32 = jit_prog.as_ptr() as u32;
+        // We need to set the LSB thumb bit.
+        prog_ptr = prog_ptr | 0x1;
+        unsafe { mem::transmute(prog_ptr as *mut u32) }
+    }
+
+    fn log_program_contents(&self) {
         let mut prog_str: String = String::new();
         for (i, b) in self.contents.iter().take(self.offset).enumerate() {
             prog_str.push_str(&format!("{:02x}", *b));
@@ -970,9 +992,6 @@ impl<'a> JitMemory<'a> {
             }
         }
         debug!("JIT program:\n{}", prog_str);
-        // We need to set the LSB thumb bit.
-        prog_ptr = prog_ptr | 0x1;
-        unsafe { mem::transmute(prog_ptr as *mut u32) }
     }
 }
 
@@ -997,4 +1016,168 @@ fn error_32_bit_arch() -> Result<(), Error> {
             "[JIT] Attempted to compile a 64-bit instruction on a 32-bit ARMv7-eM architecture."
         ),
     ))
+}
+
+/// This function is responsible for dealing with relocations that only refer
+/// to the `.data` and `.rodata` sections of the ELF file. It is used by the JIT
+/// compiler to adjust load instructions once the above sections are copied over
+/// from the eBPF program to the jitted program memory. Because of this, we only
+/// consider relocations that touch the .data and .rodata sections below. As those
+/// are the only ones that are currently being copied over from the original
+/// program to the emitted jitted program.
+pub fn resolve_data_rodata_relocations(
+    program: &mut [u8],
+    data_addr: usize,
+    rodata_addr: usize,
+) -> Result<(), String> {
+    let program_addr = program.as_ptr() as usize;
+    let Ok(binary) = goblin::elf::Elf::parse(&program) else {
+        return Err("Failed to parse the ELF binary".to_string());
+    };
+
+    let relocations = find_relocations(&binary, &program);
+    let mut relocations_to_patch = vec![];
+    for (section_offset, relocation) in relocations {
+        debug!("Relocation found: {:?}", relocation);
+        if let Some(symbol) = binary.syms.get(relocation.r_sym) {
+            // Here the value of the relocation tells us the offset in the binary
+            // where the data that needs to be relocated is located.
+            debug!("Relocation symbol found: {:?}", symbol);
+            let section = binary.section_headers.get(symbol.st_shndx).unwrap();
+            debug!(
+                "Symbol is located in section at offset {:x}",
+                section.sh_offset
+            );
+            let section_name = binary.strtab.get_at(section.sh_name);
+            if section_name == Some(".data") || section_name == Some(".rodata") {
+                let base_addr = match section_name.unwrap() {
+                    ".data" => data_addr,
+                    ".rodata" => rodata_addr,
+                    _ => unreachable!()
+                };
+                let relocated_addr = (base_addr as u64 + symbol.st_value) as u32;
+                relocations_to_patch.push((
+                    section_offset + relocation.r_offset as usize,
+                    relocated_addr,
+                ));
+            }
+        }
+    }
+
+    for (offset, value) in relocations_to_patch {
+        debug!(
+            "Patching program at offset: {:x} with new immediate value: {:x}",
+            offset, value
+        );
+        match program[offset] as u32 {
+            LDDW_OPCODE => {
+                let mut instr: Lddw = Lddw::from(&program[offset..offset + LDDW_INSTRUCTION_SIZE]);
+                instr.immediate_l += value;
+                program[offset..offset + LDDW_INSTRUCTION_SIZE].copy_from_slice((&instr).into());
+            }
+            CALL_OPCODE => {
+                let mut instr: Call = Call::from(&program[offset..offset + INSTRUCTION_SIZE]);
+                // Both src and dst registers are specified usign one field so we
+                // need to set it like this. The src register value 3 tells the
+                // vm to treat the immediate operand of the call as the actual
+                // memory address of the function call.
+                instr.registers = 0x3 << 4;
+                instr.immediate = value;
+                program[offset..offset + INSTRUCTION_SIZE].copy_from_slice((&instr).into());
+            }
+            0 => {
+                // When dealing with data relocations, the opcode is 0
+                let value_bytes = unsafe {
+                    core::slice::from_raw_parts(&value as *const _ as *const u8, INSTRUCTION_SIZE)
+                };
+                program[offset..offset + INSTRUCTION_SIZE].copy_from_slice(value_bytes);
+            }
+            _ => {
+                error!("Unsupported relocation opcode at offset: {:x}", offset);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/* Below the functions and internal representation structs were copied over from the elf-utils
+crate because that one depends on rbpf and we would have a circular dependency. */
+
+pub const INSTRUCTION_SIZE: usize = 8;
+const SYMBOL_SIZE: usize = 6;
+
+pub const LDDW_INSTRUCTION_SIZE: usize = 16;
+pub const LDDW_OPCODE: u32 = 0x18;
+pub const CALL_OPCODE: u32 = 0x85;
+
+pub fn find_relocations(binary: &Elf<'_>, buffer: &[u8]) -> Vec<(usize, Reloc)> {
+    let mut relocations = alloc::vec![];
+
+    let context = goblin::container::Ctx::new(Container::Big, Endian::Little);
+
+    for (i, section) in binary.section_headers.iter().enumerate() {
+        if section.sh_type == goblin::elf::section_header::SHT_REL {
+            // Relocations section is always located immediately after the section
+            // that needs to have those relocations applied
+            let preceding_section_offset = binary.section_headers[i - 1].sh_offset as usize;
+            let offset = section.sh_offset as usize;
+            let size = section.sh_size as usize;
+            let relocs =
+                goblin::elf::reloc::RelocSection::parse(&buffer, offset, size, false, context)
+                    .unwrap();
+            relocs
+                .iter()
+                .for_each(|reloc| relocations.push((preceding_section_offset, reloc)));
+        }
+    }
+
+    relocations
+}
+
+/// Load-double-word instruction, needed for bytecode patching for loads from
+/// .data and .rodata sections.
+#[repr(C, packed)]
+pub struct Lddw {
+    pub opcode: u8,
+    pub registers: u8,
+    pub offset: u16,
+    pub immediate_l: u32,
+    pub null1: u8,
+    pub null2: u8,
+    pub null3: u16,
+    pub immediate_h: u32,
+}
+impl From<&[u8]> for Lddw {
+    fn from(bytes: &[u8]) -> Self {
+        unsafe { core::ptr::read(bytes.as_ptr() as *const _) }
+    }
+}
+
+impl<'a> Into<&'a [u8]> for &'a Lddw {
+    fn into(self) -> &'a [u8] {
+        unsafe { core::slice::from_raw_parts(self as *const _ as *const u8, LDDW_INSTRUCTION_SIZE) }
+    }
+}
+
+/// Call instruction used for calling eBPF helper functions and program local
+/// function calls
+#[repr(C, packed)]
+pub struct Call {
+    pub opcode: u8,
+    pub registers: u8,
+    pub offset: u16,
+    pub immediate: u32,
+}
+
+impl From<&[u8]> for Call {
+    fn from(bytes: &[u8]) -> Self {
+        unsafe { core::ptr::read(bytes.as_ptr() as *const _) }
+    }
+}
+
+impl<'a> Into<&'a [u8]> for &'a Call {
+    fn into(self) -> &'a [u8] {
+        unsafe { core::slice::from_raw_parts(self as *const _ as *const u8, INSTRUCTION_SIZE) }
+    }
 }

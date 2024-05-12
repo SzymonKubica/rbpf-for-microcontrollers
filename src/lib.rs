@@ -37,6 +37,7 @@ extern crate core;
 extern crate libm;
 extern crate log;
 extern crate time;
+extern crate goblin;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;
@@ -48,7 +49,6 @@ extern crate cranelift_jit;
 extern crate cranelift_module;
 #[cfg(feature = "cranelift")]
 extern crate cranelift_native;
-
 // Conditional importing based on std/no_std described here:
 // https://gist.github.com/tdelabro/b2d1f2a0f94ceba72b718b92f9a7ad7b
 #[cfg(feature = "std")]
@@ -67,6 +67,7 @@ mod stdlib {
     pub use crate::without_std::*;
 }
 
+use alloc::boxed::Box;
 use binary_layouts::{ExtendedHeaderBinary, FemtoContainersBinary, RawElfFileBinary};
 use byteorder::{ByteOrder, LittleEndian};
 pub use jit_thumbv7em::{JitCompiler, JitMemory};
@@ -74,7 +75,6 @@ use stdlib::collections::BTreeMap;
 use stdlib::collections::{vec, Vec};
 use stdlib::u32;
 use stdlib::{Error, ErrorKind};
-use alloc::boxed::Box;
 
 #[cfg(std)]
 mod asm_parser;
@@ -190,8 +190,9 @@ struct MetaBuff {
 /// assert_eq!(res, 0x2211);
 /// ```
 pub struct EbpfVmMbuff<'a> {
-    prog: Option<&'a [u8]>,
+    prog: Option<&'a mut [u8]>,
     verifier: Verifier,
+    jit: Option<jit_thumbv7em::JitMemory<'a>>,
     #[cfg(jit)]
     jit: Option<jit::JitMemory<'a>>,
     #[cfg(feature = "cranelift")]
@@ -217,7 +218,7 @@ impl<'a> EbpfVmMbuff<'a> {
     /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog)).unwrap();
     /// ```
     pub fn new(
-        prog: Option<&'a [u8]>,
+        prog: Option<&'a mut [u8]>,
         interpreter_variant: InterpreterVariant,
     ) -> Result<EbpfVmMbuff<'a>, Error> {
         // We need to dynamically define the verifier in this way as the
@@ -241,6 +242,7 @@ impl<'a> EbpfVmMbuff<'a> {
         Ok(EbpfVmMbuff {
             prog,
             verifier,
+            jit: None,
             #[cfg(jit)]
             jit: None,
             #[cfg(feature = "cranelift")]
@@ -269,7 +271,7 @@ impl<'a> EbpfVmMbuff<'a> {
     /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog1)).unwrap();
     /// vm.set_program(prog2).unwrap();
     /// ```
-    pub fn set_program(&mut self, prog: &'a [u8]) -> Result<(), Error> {
+    pub fn set_program(&mut self, prog: &'a mut [u8]) -> Result<(), Error> {
         (self.verifier)(prog)?;
         self.prog = Some(prog);
         Ok(())
@@ -277,15 +279,18 @@ impl<'a> EbpfVmMbuff<'a> {
 
     /// Allows for verifying the program that is already loaded into the virtual machine.
     pub fn verify_loaded_program(&self) -> Result<(), Error> {
-        (self.verifier)(self.prog.unwrap())
+        (self.verifier)(self.prog.as_ref().unwrap())
     }
 
     /// Allows for verifying the program that is already loaded into the VM only
     /// calls the allowed helper functions
-    pub fn verify_helper_calls(&self, helper_idxs: &[u32], interpreter_variant: InterpreterVariant)-> Result<(), Error> {
-        check_helpers(self.prog.unwrap(), helper_idxs, interpreter_variant)
+    pub fn verify_helper_calls(
+        &self,
+        helper_idxs: &[u32],
+        interpreter_variant: InterpreterVariant,
+    ) -> Result<(), Error> {
+        check_helpers(self.prog.as_ref().unwrap(), helper_idxs, interpreter_variant)
     }
-
 
     /// Set a new verifier function. The function should return an `Error` if the program should be
     /// rejected by the virtual machine. If a program has been loaded to the VM already, the
@@ -318,7 +323,7 @@ impl<'a> EbpfVmMbuff<'a> {
     /// vm.set_verifier(verifier).unwrap();
     /// ```
     pub fn set_verifier(&mut self, verifier: Verifier) -> Result<(), Error> {
-        if let Some(prog) = self.prog {
+        if let Some(prog) = self.prog.as_ref() {
             verifier(prog)?;
         }
         self.verifier = verifier;
@@ -429,7 +434,7 @@ impl<'a> EbpfVmMbuff<'a> {
         mbuff: &[u8],
         allowed_memory_regions: Vec<(u64, u64)>,
     ) -> Result<u64, Error> {
-        let prog = match self.prog {
+        let prog = match &self.prog {
             Some(prog) => prog,
             None => Err(Error::new(
                 ErrorKind::Other,
@@ -439,7 +444,7 @@ impl<'a> EbpfVmMbuff<'a> {
 
         if self.interpreter_variant == InterpreterVariant::Default {
             return interpreter::execute_program(
-                self.prog,
+                self.prog.as_deref(),
                 mem,
                 mbuff,
                 &self.helpers,
@@ -453,13 +458,36 @@ impl<'a> EbpfVmMbuff<'a> {
             _ => unreachable!(),
         };
         interpreter_generic::execute_program(
-            prog,
+            *prog,
             mem,
             mbuff,
             &self.helpers,
             allowed_memory_regions,
             binary,
         )
+    }
+
+    /// JIT-compile the loaded program, using the ARMv7 jit compiler.
+    pub fn jit_compile(
+        &mut self,
+        jit_memory: &'a mut [u8],
+        interpreter_variant: InterpreterVariant,
+    ) -> Result<(), Error> {
+        if let None = self.prog {
+            Err(Error::new(
+                ErrorKind::Other,
+                "Error: No program set, call prog_set() to load one",
+            ))?;
+        };
+        self.jit = Some(jit_thumbv7em::JitMemory::new(
+            self.prog.as_deref_mut().unwrap(),
+            jit_memory,
+            &self.helpers,
+            true,
+            false,
+            interpreter_variant,
+        )?);
+        Ok(())
     }
 
     /// JIT-compile the loaded program. No argument required for this.
@@ -572,6 +600,37 @@ impl<'a> EbpfVmMbuff<'a> {
                 0,
                 0,
             )),
+            None => Err(Error::new(
+                ErrorKind::Other,
+                "Error: program has not been JIT-compiled",
+            )),
+        }
+    }
+
+
+    pub unsafe fn execute_program_jit(
+        &self,
+        mem: &mut [u8],
+        mbuff: &'a mut [u8],
+    ) -> Result<u64, Error> {
+        // If packet data is empty, do not send the address of an empty slice; send a null pointer
+        //  as first argument instead, as this is uBPF's behavior (empty packet should not happen
+        //  in the kernel; anyway the verifier would prevent the use of uninitialized registers).
+        //  See `mul_loop` test.
+        let mem_ptr = match mem.len() {
+            0 => core::ptr::null_mut(),
+            _ => mem.as_ptr() as *mut u8,
+        };
+        // The last two arguments are not used in this function. They would be used if there was a
+        // need to indicate to the JIT at which offset in the mbuff mem_ptr and mem_ptr + mem.len()
+        // should be stored; this is what happens with struct EbpfVmFixedMbuff.
+        match &self.jit {
+            Some(jit) => Ok(jit.get_prog()(
+                mbuff.as_ptr() as *mut u8,
+                mbuff.len(),
+                mem_ptr,
+                mem.len(),
+            ).into()),
             None => Err(Error::new(
                 ErrorKind::Other,
                 "Error: program has not been JIT-compiled",
@@ -780,7 +839,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// let mut vm = rbpf::EbpfVmFixedMbuff::new(Some(prog), 0x40, 0x50).unwrap();
     /// ```
     pub fn new(
-        prog: Option<&'a [u8]>,
+        prog: Option<&'a mut [u8]>,
         data_offset: usize,
         data_end_offset: usize,
         interpreter_variant: InterpreterVariant,
@@ -830,7 +889,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// ```
     pub fn set_program(
         &mut self,
-        prog: &'a [u8],
+        prog: &'a mut [u8],
         data_offset: usize,
         data_end_offset: usize,
     ) -> Result<(), Error> {
@@ -1269,7 +1328,7 @@ impl<'a> EbpfVmRaw<'a> {
     /// let vm = rbpf::EbpfVmRaw::new(Some(prog)).unwrap();
     /// ```
     pub fn new(
-        prog: Option<&'a [u8]>,
+        prog: Option<&'a mut [u8]>,
         interpreter_variant: InterpreterVariant,
     ) -> Result<EbpfVmRaw<'a>, Error> {
         let parent = EbpfVmMbuff::new(prog, interpreter_variant)?;
@@ -1302,7 +1361,7 @@ impl<'a> EbpfVmRaw<'a> {
     /// let res = vm.execute_program(mem).unwrap();
     /// assert_eq!(res, 0x22cc);
     /// ```
-    pub fn set_program(&mut self, prog: &'a [u8]) -> Result<(), Error> {
+    pub fn set_program(&mut self, prog: &'a mut [u8]) -> Result<(), Error> {
         self.parent.set_program(prog)?;
         Ok(())
     }
@@ -1640,7 +1699,7 @@ impl<'a> EbpfVmNoData<'a> {
     /// let vm = rbpf::EbpfVmNoData::new(Some(prog));
     /// ```
     pub fn new(
-        prog: Option<&'a [u8]>,
+        prog: Option<&'a mut [u8]>,
         interpreter_variant: InterpreterVariant,
     ) -> Result<EbpfVmNoData<'a>, Error> {
         let parent = EbpfVmRaw::new(prog, interpreter_variant)?;
@@ -1672,7 +1731,7 @@ impl<'a> EbpfVmNoData<'a> {
     /// let res = vm.execute_program().unwrap();
     /// assert_eq!(res, 0x1122);
     /// ```
-    pub fn set_program(&mut self, prog: &'a [u8]) -> Result<(), Error> {
+    pub fn set_program(&mut self, prog: &'a mut [u8]) -> Result<(), Error> {
         self.parent.set_program(prog)?;
         Ok(())
     }
