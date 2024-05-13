@@ -7,8 +7,8 @@
 // Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
 //      (Adaptation for ARM thumbv7em architecture running on ARM Cortex M4)
 
-use alloc::string::ToString;
 use alloc::boxed::Box;
+use alloc::string::ToString;
 use core::cell::RefCell;
 use core::mem;
 use core::ops::{Index, IndexMut};
@@ -18,7 +18,6 @@ use log::{debug, error};
 use stdlib::collections::BTreeMap as HashMap;
 use stdlib::collections::Vec;
 use stdlib::{Error, ErrorKind, String};
-
 
 use ebpf;
 use thumbv7em::*;
@@ -158,33 +157,64 @@ impl JitCompiler {
         // Depending on the binary file layout the pointer to the first instruction
         // is located in different places.
         //
-        let prog = RefCell::new(prog);
-        let prog_read_only = prog.borrow();
         let binary: Box<dyn Binary> = match self.interpreter_variant {
             InterpreterVariant::Default => Box::new(TextSectionOnlyBinary {}),
-            InterpreterVariant::FemtoContainersHeader => Box::new(FemtoContainersBinary::new(&prog_read_only)),
-            InterpreterVariant::ExtendedHeader => Box::new(ExtendedHeaderBinary::new(&prog_read_only)),
-            InterpreterVariant::RawObjectFile => Box::new(RawElfFileBinary::new(&prog_read_only)?),
+            InterpreterVariant::FemtoContainersHeader => {
+                Box::new(FemtoContainersBinary::new(&prog))
+            }
+            InterpreterVariant::ExtendedHeader => Box::new(ExtendedHeaderBinary::new(&prog)),
+            InterpreterVariant::RawObjectFile => Box::new(RawElfFileBinary::new(&prog)?),
         };
 
         // We need to write the .data and .rodata sections at the start of the
         // program and store pointers to them, so that we can perform relocations
         // accordingly.
 
-        let mut text = binary.get_text_section(&prog_read_only)?;
-        let data_section = binary.get_data_section(&prog_read_only).unwrap_or(&[]);
-        let rodata_section = binary.get_rodata_section(&prog_read_only).unwrap_or(&[]);
+        let data_section = binary.get_data_section(&prog).unwrap_or(&[]);
+        let rodata_section = binary.get_rodata_section(&prog).unwrap_or(&[]);
         let data_offset = 0;
-        let rodata_offset = data_section.len();
+        let mut rodata_offset = data_section.len();
+        if rodata_offset % 2 == 1 {
+            // The .rodata section needs to be aligned at 16-bit boundary
+            rodata_offset += 1;
+        }
         mem.contents[..data_section.len()].copy_from_slice(data_section);
-        mem.contents[rodata_offset..rodata_section.len()].copy_from_slice(rodata_section);
-        mem.offset += data_section.len() + rodata_section.len();
+        mem.contents[rodata_offset..rodata_offset + rodata_section.len()]
+            .copy_from_slice(rodata_section);
+        let mut text_offset = rodata_offset + rodata_section.len();
+        // The instructions we emit need to be aligned at 16-bit boundary
+        if text_offset % 2 == 1 {
+            text_offset += 1;
+        }
+        mem.offset = text_offset;
+        mem.text_offset = mem.offset;
+
+        debug!("JIT: data section length: {}", data_section.len());
+        debug!("JIT: rodata section length: {}", rodata_section.len());
+        debug!(
+            "JIT: text section offset: {} ({:#x})",
+            text_offset, text_offset
+        );
 
         let data_addr = mem.contents.as_ptr() as usize + data_offset;
         let rodata_addr = mem.contents.as_ptr() as usize + rodata_offset;
 
-        let mut prog_mut = prog.borrow_mut();
-        resolve_data_rodata_relocations(&mut prog_mut, data_addr, rodata_addr);
+        debug!(
+            "JIT: memory buffer address: {:#x}",
+            mem.contents.as_ptr() as usize
+        );
+        debug!("JIT: rodata section address: {:#x}", rodata_addr);
+        debug!("JIT: data section address: {:#x}", data_addr);
+
+        // we need to make this static as allocating it on the stack messes things
+        // up and the microcontroller freezes, I suspect stack overflow. TODO:
+        // make this better by passing it from the outside, allowing for mutating the input program
+        static mut program_copy: [u8; 4096] = [0u8; 4096];
+        unsafe {
+            program_copy[..prog.len()].copy_from_slice(&prog);
+            resolve_data_rodata_relocations(&mut program_copy, data_addr, rodata_addr);
+        }
+        let mut text = unsafe { binary.get_text_section(&program_copy)? };
 
         let callee_saved_regs = vec![R4, R5, R6, R7, R8, R10, R11, LR];
         I::PushMultipleRegisters {
@@ -830,6 +860,7 @@ impl JitCompiler {
             let mut offset_mem = JitMemory {
                 contents: mem.contents,
                 offset: jump.memory_offset,
+                text_offset: 0,
             };
             ThumbInstruction::ConditionalBranch {
                 cond: jump.condition,
@@ -930,6 +961,7 @@ impl JitCompiler {
 /// the struct.
 pub struct JitMemory<'a> {
     contents: &'a mut [u8],
+    pub text_offset: usize,
     pub offset: usize,
 }
 
@@ -954,6 +986,7 @@ impl<'a> JitMemory<'a> {
         let mut mem = JitMemory {
             contents: jit_memory_buff,
             offset: 0,
+            text_offset: 0,
         };
 
         let mut jit = JitCompiler::new(interpreter_variant);
@@ -968,7 +1001,7 @@ impl<'a> JitMemory<'a> {
     /// the LSB bit of the instruction pointer needs to be set to indicate to the
     /// CPU that it needs to be run in Thumb mode [see here](https://developer.arm.com/documentation/dui0471/m/interworking-arm-and-thumb/pointers-to-functions-in-thumb-state)
     pub fn get_prog(&self) -> MachineCode {
-        let mut prog_ptr: u32 = self.contents.as_ptr() as u32;
+        let mut prog_ptr: u32 = self.contents.as_ptr() as u32 + self.text_offset as u32;
         // We need to set the LSB thumb bit.
         prog_ptr = prog_ptr | 0x1;
         self.log_program_contents();
@@ -976,8 +1009,8 @@ impl<'a> JitMemory<'a> {
     }
 
     /// Allows for transmuting a previously jit-compiled program into a function.
-    pub fn get_prog_from_slice(jit_prog: &[u8]) -> MachineCode {
-        let mut prog_ptr: u32 = jit_prog.as_ptr() as u32;
+    pub fn get_prog_from_slice(jit_prog: &[u8], text_offset: usize) -> MachineCode {
+        let mut prog_ptr: u32 = jit_prog.as_ptr() as u32 + text_offset as u32;
         // We need to set the LSB thumb bit.
         prog_ptr = prog_ptr | 0x1;
         unsafe { mem::transmute(prog_ptr as *mut u32) }
@@ -1048,12 +1081,12 @@ pub fn resolve_data_rodata_relocations(
                 "Symbol is located in section at offset {:x}",
                 section.sh_offset
             );
-            let section_name = binary.strtab.get_at(section.sh_name);
+            let section_name = binary.shdr_strtab.get_at(section.sh_name);
             if section_name == Some(".data") || section_name == Some(".rodata") {
                 let base_addr = match section_name.unwrap() {
                     ".data" => data_addr,
                     ".rodata" => rodata_addr,
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
                 let relocated_addr = (base_addr as u64 + symbol.st_value) as u32;
                 relocations_to_patch.push((
