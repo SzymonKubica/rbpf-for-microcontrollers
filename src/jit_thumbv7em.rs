@@ -995,6 +995,7 @@ impl<'a> JitMemory<'a> {
             helpers,
         )?;
         jit.resolve_jumps(&mut mem)?;
+        Self::log_program_contents(&mem.contents, mem.offset, mem.text_offset);
 
         Ok(mem)
     }
@@ -1007,7 +1008,6 @@ impl<'a> JitMemory<'a> {
         let mut prog_ptr: u32 = self.contents.as_ptr() as u32 + self.text_offset as u32;
         // We need to set the LSB thumb bit.
         prog_ptr = prog_ptr | 0x1;
-        self.log_program_contents();
         unsafe { mem::transmute(prog_ptr as *mut u32) }
     }
 
@@ -1020,15 +1020,19 @@ impl<'a> JitMemory<'a> {
         unsafe { mem::transmute(prog_ptr as *mut u32) }
     }
 
-    fn log_program_contents(&self) {
+    fn log_program_contents(jit_prog: &[u8], offset: usize, text_offset: usize) {
         let mut prog_str: String = String::new();
-        for (i, b) in self.contents.iter().take(self.offset).enumerate() {
+        for (i, b) in jit_prog.iter().skip(text_offset).take(offset-text_offset).enumerate() {
             prog_str.push_str(&format!("{:02x}", *b));
             if i % 4 == 3 {
                 prog_str.push_str("\n");
             }
         }
         debug!("JIT program:\n{}", prog_str);
+    }
+
+    fn log_program(&self) {
+        Self::log_program_contents(&self.contents, self.offset, self.text_offset);
     }
 }
 
