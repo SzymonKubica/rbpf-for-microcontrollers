@@ -1,8 +1,12 @@
 use log::debug;
 
-use super::{common::ElfSection, CallInstructionHandler, SectionAccessor, Binary, LddwdrInstructionHandler};
-use stdlib::{Error, ErrorKind};
+use crate::ebpf::{self, Insn};
+
+use super::{
+    common::ElfSection, Binary, CallInstructionHandler, LddwdrInstructionHandler, SectionAccessor,
+};
 use alloc::vec::Vec;
+use stdlib::{Error, ErrorKind};
 
 /// Extended version of the metadata header used by Femto-Containers. This one
 /// contains information regarding the relocated calls (for supporting non-inlined,
@@ -175,5 +179,42 @@ impl CallInstructionHandler for ExtendedHeaderBinary {
     }
 }
 
-impl LddwdrInstructionHandler for ExtendedHeaderBinary {}
+impl LddwdrInstructionHandler for ExtendedHeaderBinary {
+    fn handle_lddwd_instruction(
+        &self,
+        program: &[u8],
+        insn: Insn,
+        dst: usize,
+        insn_ptr: &mut usize,
+        text_section: &[u8],
+        reg: &mut [u64],
+    ) -> Result<(), Error> {
+        let next_insn = ebpf::get_insn(text_section, *insn_ptr);
+        *insn_ptr += 1;
+        reg[dst] = program.as_ptr() as u64
+            + self.data_section.offset as u64
+            + ((insn.imm as u32) as u64)
+            + ((next_insn.imm as u64) << 32);
+
+        Ok(())
+    }
+
+    fn handle_lddwr_instruction(
+        &self,
+        program: &[u8],
+        insn: Insn,
+        dst: usize,
+        insn_ptr: &mut usize,
+        text_section: &[u8],
+        reg: &mut [u64],
+    ) -> Result<(), Error> {
+        let next_insn = ebpf::get_insn(text_section, *insn_ptr);
+        *insn_ptr += 1;
+        reg[dst] = program.as_ptr() as u64
+            + self.rodata_section.offset as u64
+            + ((insn.imm as u32) as u64)
+            + ((next_insn.imm as u64) << 32);
+        Ok(())
+    }
+}
 impl Binary for ExtendedHeaderBinary {}

@@ -190,7 +190,7 @@ struct MetaBuff {
 /// assert_eq!(res, 0x2211);
 /// ```
 pub struct EbpfVmMbuff<'a> {
-    prog: Option<&'a mut [u8]>,
+    prog: Option<&'a [u8]>,
     verifier: Verifier,
     jit: Option<jit_thumbv7em::JitMemory<'a>>,
     #[cfg(jit)]
@@ -218,7 +218,7 @@ impl<'a> EbpfVmMbuff<'a> {
     /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog)).unwrap();
     /// ```
     pub fn new(
-        prog: Option<&'a mut [u8]>,
+        prog: Option<&'a [u8]>,
         interpreter_variant: InterpreterVariant,
     ) -> Result<EbpfVmMbuff<'a>, Error> {
         // We need to dynamically define the verifier in this way as the
@@ -271,7 +271,7 @@ impl<'a> EbpfVmMbuff<'a> {
     /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog1)).unwrap();
     /// vm.set_program(prog2).unwrap();
     /// ```
-    pub fn set_program(&mut self, prog: &'a mut [u8]) -> Result<(), Error> {
+    pub fn set_program(&mut self, prog: &'a [u8]) -> Result<(), Error> {
         (self.verifier)(prog)?;
         self.prog = Some(prog);
         Ok(())
@@ -279,7 +279,7 @@ impl<'a> EbpfVmMbuff<'a> {
 
     /// Allows for verifying the program that is already loaded into the virtual machine.
     pub fn verify_loaded_program(&self) -> Result<(), Error> {
-        (self.verifier)(self.prog.as_ref().unwrap())
+        (self.verifier)(self.prog.unwrap())
     }
 
     /// Allows for verifying the program that is already loaded into the VM only
@@ -289,7 +289,7 @@ impl<'a> EbpfVmMbuff<'a> {
         helper_idxs: &[u32],
         interpreter_variant: InterpreterVariant,
     ) -> Result<(), Error> {
-        check_helpers(self.prog.as_ref().unwrap(), helper_idxs, interpreter_variant)
+        check_helpers(self.prog.unwrap(), helper_idxs, interpreter_variant)
     }
 
     /// Set a new verifier function. The function should return an `Error` if the program should be
@@ -323,7 +323,7 @@ impl<'a> EbpfVmMbuff<'a> {
     /// vm.set_verifier(verifier).unwrap();
     /// ```
     pub fn set_verifier(&mut self, verifier: Verifier) -> Result<(), Error> {
-        if let Some(prog) = self.prog.as_ref() {
+        if let Some(prog) = self.prog {
             verifier(prog)?;
         }
         self.verifier = verifier;
@@ -434,7 +434,7 @@ impl<'a> EbpfVmMbuff<'a> {
         mbuff: &[u8],
         allowed_memory_regions: Vec<(u64, u64)>,
     ) -> Result<u64, Error> {
-        let prog = match &self.prog {
+        let prog = match self.prog {
             Some(prog) => prog,
             None => Err(Error::new(
                 ErrorKind::Other,
@@ -444,7 +444,7 @@ impl<'a> EbpfVmMbuff<'a> {
 
         if self.interpreter_variant == InterpreterVariant::Default {
             return interpreter::execute_program(
-                self.prog.as_deref(),
+                self.prog,
                 mem,
                 mbuff,
                 &self.helpers,
@@ -458,7 +458,7 @@ impl<'a> EbpfVmMbuff<'a> {
             _ => unreachable!(),
         };
         interpreter_generic::execute_program(
-            *prog,
+            prog,
             mem,
             mbuff,
             &self.helpers,
@@ -471,16 +471,27 @@ impl<'a> EbpfVmMbuff<'a> {
     pub fn jit_compile(
         &mut self,
         jit_memory: &'a mut [u8],
+        // We need additional memory buffer so that the loaded program can be
+        // copied there and patched with resolved relocations. The reason we
+        // need to do this is that we need to copy over the .data and .rodata
+        // sections into the jit program buffer and thus all relocations that
+        // were previously present in the eBPF program are no longer valid as
+        // they would point to the wrong memory location (the old eBPF program).
+        // The jit program needs to reference the .data and .rodata sections
+        // inside of itself.
+        prog_copy_buff: &mut [u8],
         interpreter_variant: InterpreterVariant,
     ) -> Result<(), Error> {
-        if let None = self.prog {
-            Err(Error::new(
+        let prog = match self.prog {
+            Some(prog) => prog,
+            None => Err(Error::new(
                 ErrorKind::Other,
                 "Error: No program set, call prog_set() to load one",
-            ))?;
+            ))?,
         };
         self.jit = Some(jit_thumbv7em::JitMemory::new(
-            self.prog.as_deref_mut().unwrap(),
+            prog,
+            prog_copy_buff,
             jit_memory,
             &self.helpers,
             true,
@@ -839,7 +850,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// let mut vm = rbpf::EbpfVmFixedMbuff::new(Some(prog), 0x40, 0x50).unwrap();
     /// ```
     pub fn new(
-        prog: Option<&'a mut [u8]>,
+        prog: Option<&'a [u8]>,
         data_offset: usize,
         data_end_offset: usize,
         interpreter_variant: InterpreterVariant,
@@ -889,7 +900,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// ```
     pub fn set_program(
         &mut self,
-        prog: &'a mut [u8],
+        prog: &'a [u8],
         data_offset: usize,
         data_end_offset: usize,
     ) -> Result<(), Error> {
@@ -1328,7 +1339,7 @@ impl<'a> EbpfVmRaw<'a> {
     /// let vm = rbpf::EbpfVmRaw::new(Some(prog)).unwrap();
     /// ```
     pub fn new(
-        prog: Option<&'a mut [u8]>,
+        prog: Option<&'a [u8]>,
         interpreter_variant: InterpreterVariant,
     ) -> Result<EbpfVmRaw<'a>, Error> {
         let parent = EbpfVmMbuff::new(prog, interpreter_variant)?;
@@ -1361,7 +1372,7 @@ impl<'a> EbpfVmRaw<'a> {
     /// let res = vm.execute_program(mem).unwrap();
     /// assert_eq!(res, 0x22cc);
     /// ```
-    pub fn set_program(&mut self, prog: &'a mut [u8]) -> Result<(), Error> {
+    pub fn set_program(&mut self, prog: &'a [u8]) -> Result<(), Error> {
         self.parent.set_program(prog)?;
         Ok(())
     }
@@ -1699,7 +1710,7 @@ impl<'a> EbpfVmNoData<'a> {
     /// let vm = rbpf::EbpfVmNoData::new(Some(prog));
     /// ```
     pub fn new(
-        prog: Option<&'a mut [u8]>,
+        prog: Option<&'a [u8]>,
         interpreter_variant: InterpreterVariant,
     ) -> Result<EbpfVmNoData<'a>, Error> {
         let parent = EbpfVmRaw::new(prog, interpreter_variant)?;
@@ -1731,7 +1742,7 @@ impl<'a> EbpfVmNoData<'a> {
     /// let res = vm.execute_program().unwrap();
     /// assert_eq!(res, 0x1122);
     /// ```
-    pub fn set_program(&mut self, prog: &'a mut [u8]) -> Result<(), Error> {
+    pub fn set_program(&mut self, prog: &'a [u8]) -> Result<(), Error> {
         self.parent.set_program(prog)?;
         Ok(())
     }

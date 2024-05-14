@@ -149,7 +149,8 @@ impl JitCompiler {
     fn jit_compile(
         &mut self,
         mem: &mut JitMemory,
-        prog: &mut [u8],
+        prog: &[u8],
+        prog_copy: &mut [u8],
         use_mbuff: bool,
         update_data_ptr: bool, // This isn't used by my version of the jit.
         helpers: &HashMap<u32, ebpf::Helper>,
@@ -206,15 +207,9 @@ impl JitCompiler {
         debug!("JIT: rodata section address: {:#x}", rodata_addr);
         debug!("JIT: data section address: {:#x}", data_addr);
 
-        // we need to make this static as allocating it on the stack messes things
-        // up and the microcontroller freezes, I suspect stack overflow. TODO:
-        // make this better by passing it from the outside, allowing for mutating the input program
-        static mut program_copy: [u8; 4096] = [0u8; 4096];
-        unsafe {
-            program_copy[..prog.len()].copy_from_slice(&prog);
-            resolve_data_rodata_relocations(&mut program_copy, data_addr, rodata_addr);
-        }
-        let mut text = unsafe { binary.get_text_section(&program_copy)? };
+        prog_copy[..prog.len()].copy_from_slice(&prog);
+        resolve_data_rodata_relocations(prog_copy, data_addr, rodata_addr);
+        let mut text = binary.get_text_section(&prog_copy)?;
 
         let callee_saved_regs = vec![R4, R5, R6, R7, R8, R10, R11, LR];
         I::PushMultipleRegisters {
@@ -976,7 +971,8 @@ impl<'a> JitMemory<'a> {
     /// ```
     /// And then passing a reference to the contents of that struct to this function.
     pub fn new(
-        prog: &mut [u8],
+        prog: &[u8],
+        prog_copy_buff: &mut [u8],
         jit_memory_buff: &'a mut [u8],
         helpers: &HashMap<u32, ebpf::Helper>,
         use_mbuff: bool,
@@ -990,7 +986,14 @@ impl<'a> JitMemory<'a> {
         };
 
         let mut jit = JitCompiler::new(interpreter_variant);
-        jit.jit_compile(&mut mem, prog, use_mbuff, update_data_ptr, helpers)?;
+        jit.jit_compile(
+            &mut mem,
+            prog,
+            prog_copy_buff,
+            use_mbuff,
+            update_data_ptr,
+            helpers,
+        )?;
         jit.resolve_jumps(&mut mem)?;
 
         Ok(mem)
@@ -1013,6 +1016,7 @@ impl<'a> JitMemory<'a> {
         let mut prog_ptr: u32 = jit_prog.as_ptr() as u32 + text_offset as u32;
         // We need to set the LSB thumb bit.
         prog_ptr = prog_ptr | 0x1;
+        debug!("Offset to the .text section: {}", text_offset);
         unsafe { mem::transmute(prog_ptr as *mut u32) }
     }
 
