@@ -125,7 +125,7 @@ impl SectionAccessor for ExtendedHeaderBinary {
 impl CallInstructionHandler for ExtendedHeaderBinary {
     fn handle_call_instruction(
         &self,
-        program: &[u8],
+        _program: &[u8],
         insn_ptr: &mut usize,
         insn: crate::ebpf::Insn,
         reg: &mut [u64],

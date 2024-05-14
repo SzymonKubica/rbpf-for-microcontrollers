@@ -9,7 +9,7 @@
 
 use alloc::boxed::Box;
 use alloc::string::ToString;
-use core::cell::RefCell;
+
 use core::mem;
 use core::ops::{Index, IndexMut};
 use goblin::container::{Container, Endian};
@@ -152,7 +152,7 @@ impl JitCompiler {
         prog: &[u8],
         prog_copy: &mut [u8],
         use_mbuff: bool,
-        update_data_ptr: bool, // This isn't used by my version of the jit.
+        _update_data_ptr: bool, // This isn't used by my version of the jit.
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
         // Depending on the binary file layout the pointer to the first instruction
@@ -270,7 +270,7 @@ impl JitCompiler {
 
             let dst = map_register(insn.dst);
             let src = map_register(insn.src);
-            let target_pc = insn_ptr as isize + insn.off as isize + 1;
+            let _target_pc = insn_ptr as isize + insn.off as isize + 1;
 
             debug!("JIT: insn {:?}", insn);
 
@@ -1067,7 +1067,7 @@ pub fn resolve_data_rodata_relocations(
     data_addr: usize,
     rodata_addr: usize,
 ) -> Result<(), String> {
-    let program_addr = program.as_ptr() as usize;
+    let _program_addr = program.as_ptr() as usize;
     let Ok(binary) = goblin::elf::Elf::parse(&program) else {
         return Err("Failed to parse the ELF binary".to_string());
     };

@@ -47,7 +47,7 @@ pub fn execute_program(
     mem: &[u8],
     mbuff: &[u8],
     helpers: &BTreeMap<u32, ebpf::Helper>,
-    allowed_memory_regions: Vec<(u64, u64)>,
+    _allowed_memory_regions: Vec<(u64, u64)>,
 ) -> Result<u64, Error> {
     const U32MAX: u64 = u32::MAX as u64;
     const SHIFT_MASK_32: u32 = 0x1f;

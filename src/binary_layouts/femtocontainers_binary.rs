@@ -75,7 +75,7 @@ impl SectionAccessor for FemtoContainersBinary {
 impl CallInstructionHandler for FemtoContainersBinary {
     fn handle_call_instruction(
         &self,
-        program: &[u8],
+        _program: &[u8],
         insn_ptr: &mut usize,
         insn: Insn,
         reg: &mut [u64],
@@ -133,12 +133,12 @@ impl CallInstructionHandler for FemtoContainersBinary {
 pub trait LddwdrInstructionHandler {
     fn handle_lddwd_instruction(
         &self,
-        program: &[u8],
-        insn: Insn,
-        dst: usize,
-        insn_ptr: &mut usize,
-        text_section: &[u8],
-        reg: &mut [u64],
+        _program: &[u8],
+        _insn: Insn,
+        _dst: usize,
+        _insn_ptr: &mut usize,
+        _text_section: &[u8],
+        _reg: &mut [u64],
     ) -> Result<(), Error> {
         return Err(Error::new(
             ErrorKind::Other,
@@ -147,12 +147,12 @@ pub trait LddwdrInstructionHandler {
     }
     fn handle_lddwr_instruction(
         &self,
-        program: &[u8],
-        insn: Insn,
-        dst: usize,
-        insn_ptr: &mut usize,
-        text_section: &[u8],
-        reg: &mut [u64],
+        _program: &[u8],
+        _insn: Insn,
+        _dst: usize,
+        _insn_ptr: &mut usize,
+        _text_section: &[u8],
+        _reg: &mut [u64],
     ) -> Result<(), Error> {
         return Err(Error::new(
             ErrorKind::Other,

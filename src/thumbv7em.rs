@@ -7,7 +7,7 @@ use crate::thumb_32bit_encoding::{self as thumb32, Thumb32OpcodeEncoding};
 use crate::{jit_thumbv7em::emit, JitMemory};
 use log::debug;
 use stdlib::collections::Vec;
-use stdlib::{Error, ErrorKind, String};
+use stdlib::{Error, ErrorKind};
 
 // Registers
 pub const R0: u8 = 0;
@@ -815,7 +815,7 @@ impl ThumbInstruction {
                 thumb16::HintEncoding::new(0b0, 0b0).emit(mem)
             }
 
-            ThumbInstruction::CompareRegistersShift { rm, rd, shift } => todo!(),
+            ThumbInstruction::CompareRegistersShift { rm: _, rd: _, shift: _ } => todo!(),
             ThumbInstruction::SignedDivide { rd, rm, rn } => {
                 let opcode = Thumb32OpcodeEncoding::new(0b11, 0b0111001, 0b1);
                 thumb32::ThreeRegsEncoding::new(opcode, *rd, *rn, *rm).emit(mem)

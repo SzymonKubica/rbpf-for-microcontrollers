@@ -1,8 +1,8 @@
-use crate::thumbv7em::{Condition, ThumbInstruction};
+use crate::thumbv7em::{Condition};
 use crate::{jit_thumbv7em::emit, JitMemory};
 use log::debug;
-use stdlib::collections::Vec;
-use stdlib::{Error, ErrorKind, String};
+
+use stdlib::{Error};
 
 pub const INSTRUCTION_SIZE: u16 = 16;
 

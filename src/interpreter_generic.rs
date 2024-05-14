@@ -661,7 +661,7 @@ pub fn check_mem(
 
     if let Some(addr_end) = addr.checked_add(len as u64) {
         //debug!("Checking memory {}: {}", access_type, addr);
-        let debug_section_print = |name, slice: &[u8]| {
+        let debug_section_print = |_name, _slice: &[u8]| {
             //debug!(
             //    "{}: start={:#x}, len={:#x}",
             //    name,
