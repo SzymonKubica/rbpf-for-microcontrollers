@@ -336,9 +336,13 @@ impl JitCompiler {
                     // se we need to handle it here:
                     if insn.imm < 0 {
                         let imm = -1 * insn.imm;
-                        I::Subtract8BitImmediate { rd: dst, imm8: imm as u8 }.emit_into(mem)?;
+                        I::Subtract12BitImmediate { rn: dst, rd: dst, imm12: imm as u16 }.emit_into(mem)?;
                     } else {
-                        I::Add12BitImmediate { imm12: insn.imm as u16, rn: dst, rd: dst } .emit_into(mem)?;
+                        if dst < 8 {
+                          I::Add8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                        } else {
+                          I::Add12BitImmediate { imm12: insn.imm as u16, rn: dst, rd: dst } .emit_into(mem)?;
+                        }
                     }
                 }
                 ebpf::ADD32_REG | ebpf::ADD64_REG => {
@@ -354,7 +358,11 @@ impl JitCompiler {
                             ),
                         ))?;
                     }
-                    I::Subtract8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    if dst < 8 {
+                      I::Subtract8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                    } else {
+                      I::Subtract12BitImmediate { imm12: insn.imm as u16, rn: dst, rd: dst } .emit_into(mem)?;
+                    }
                 }
                 ebpf::SUB32_REG | ebpf::SUB64_REG => {
                     I::Subtract { rm: insn.src, rn: insn.dst, rd: insn.dst } .emit_into(mem)?;

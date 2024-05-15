@@ -116,6 +116,11 @@ pub enum ThumbInstruction {
         rn: u8,
         rd: u8,
     },
+    Subtract12BitImmediate {
+        imm12: u16,
+        rn: u8,
+        rd: u8,
+    },
     MoveImmediate {
         rd: u8,
         imm: i32,
@@ -832,6 +837,10 @@ impl ThumbInstruction {
             }
             ThumbInstruction::Add12BitImmediate { imm12, rn, rd } => {
                 let opcode = Thumb32OpcodeEncoding::new(0b10, 0b100000, 0b0);
+                return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16).emit(mem);
+            }
+            ThumbInstruction::Subtract12BitImmediate { imm12, rn, rd } => {
+                let opcode = Thumb32OpcodeEncoding::new(0b10, 0b101010, 0b0);
                 return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16).emit(mem);
             }
         }
