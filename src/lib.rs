@@ -468,38 +468,38 @@ impl<'a> EbpfVmMbuff<'a> {
     }
 
     /// JIT-compile the loaded program, using the ARMv7 jit compiler.
-    pub fn jit_compile(
-        &mut self,
-        jit_memory: &'a mut [u8],
-        // We need additional memory buffer so that the loaded program can be
-        // copied there and patched with resolved relocations. The reason we
-        // need to do this is that we need to copy over the .data and .rodata
-        // sections into the jit program buffer and thus all relocations that
-        // were previously present in the eBPF program are no longer valid as
-        // they would point to the wrong memory location (the old eBPF program).
-        // The jit program needs to reference the .data and .rodata sections
-        // inside of itself.
-        prog_copy_buff: &mut [u8],
-        interpreter_variant: InterpreterVariant,
-    ) -> Result<(), Error> {
-        let prog = match self.prog {
-            Some(prog) => prog,
-            None => Err(Error::new(
-                ErrorKind::Other,
-                "Error: No program set, call prog_set() to load one",
-            ))?,
-        };
-        self.jit = Some(jit_thumbv7em::JitMemory::new(
-            prog,
-            prog_copy_buff,
-            jit_memory,
-            &self.helpers,
-            true,
-            false,
-            interpreter_variant,
-        )?);
-        Ok(())
-    }
+    //pub fn jit_compile(
+    //    &mut self,
+    //    jit_memory: &'a mut [u8],
+    //    // We need additional memory buffer so that the loaded program can be
+    //    // copied there and patched with resolved relocations. The reason we
+    //    // need to do this is that we need to copy over the .data and .rodata
+    //    // sections into the jit program buffer and thus all relocations that
+    //    // were previously present in the eBPF program are no longer valid as
+    //    // they would point to the wrong memory location (the old eBPF program).
+    //    // The jit program needs to reference the .data and .rodata sections
+    //    // inside of itself.
+    //    prog_copy_buff: &mut [u8],
+    //    interpreter_variant: InterpreterVariant,
+    //) -> Result<(), Error> {
+    //    let prog = match self.prog {
+    //        Some(prog) => prog,
+    //        None => Err(Error::new(
+    //            ErrorKind::Other,
+    //            "Error: No program set, call prog_set() to load one",
+    //        ))?,
+    //    };
+    //    self.jit = Some(jit_thumbv7em::JitMemory::new(
+    //        prog,
+    //        prog_copy_buff,
+    //        jit_memory,
+    //        &self.helpers,
+    //        true,
+    //        false,
+    //        interpreter_variant,
+    //    )?);
+    //    Ok(())
+    //}
 
     /// JIT-compile the loaded program. No argument required for this.
     ///

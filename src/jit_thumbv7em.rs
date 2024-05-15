@@ -147,57 +147,52 @@ impl JitCompiler {
     fn jit_compile(
         &mut self,
         mem: &mut JitMemory,
-        prog: &[u8],
-        prog_copy: &mut [u8],
+        prog: &mut [u8],
         use_mbuff: bool,
         _update_data_ptr: bool, // This isn't used by my version of the jit.
         helpers: &HashMap<u32, ebpf::Helper>,
     ) -> Result<(), Error> {
-        // Depending on the binary file layout the pointer to the first instruction
-        // is located in different places.
-        //
-        let binary: Box<dyn Binary> = match self.interpreter_variant {
-            InterpreterVariant::Default => Box::new(TextSectionOnlyBinary {}),
-            InterpreterVariant::FemtoContainersHeader => {
-                Box::new(FemtoContainersBinary::new(&prog))
+        // In the future we'll support other binary layouts, for now only raw
+        // object file is supported for the JIT.
+
+        let mut data_addr = 0;
+        let mut rodata_addr = 0;
+
+        {
+            let binary: Box<dyn Binary> = Box::new(RawElfFileBinary::new(&prog)?);
+            // We need to write the .data and .rodata sections at the start of the
+            // program and store pointers to them, so that we can perform relocations
+            // accordingly.
+
+            let data_section = binary.get_data_section(&prog).unwrap_or(&[]);
+            let rodata_section = binary.get_rodata_section(&prog).unwrap_or(&[]);
+            let data_offset = 0;
+            let mut rodata_offset = data_section.len();
+            if rodata_offset % 2 == 1 {
+                // The .rodata section needs to be aligned at 16-bit boundary
+                rodata_offset += 1;
             }
-            InterpreterVariant::ExtendedHeader => Box::new(ExtendedHeaderBinary::new(&prog)),
-            InterpreterVariant::RawObjectFile => Box::new(RawElfFileBinary::new(&prog)?),
-        };
+            mem.contents[..data_section.len()].copy_from_slice(data_section);
+            mem.contents[rodata_offset..rodata_offset + rodata_section.len()]
+                .copy_from_slice(rodata_section);
+            let mut text_offset = rodata_offset + rodata_section.len();
+            // The instructions we emit need to be aligned at 16-bit boundary
+            if text_offset % 2 == 1 {
+                text_offset += 1;
+            }
+            mem.offset = text_offset;
+            mem.text_offset = mem.offset;
 
-        // We need to write the .data and .rodata sections at the start of the
-        // program and store pointers to them, so that we can perform relocations
-        // accordingly.
+            debug!("JIT: data section length: {}", data_section.len());
+            debug!("JIT: rodata section length: {}", rodata_section.len());
+            debug!(
+                "JIT: text section offset: {} ({:#x})",
+                text_offset, text_offset
+            );
 
-        let data_section = binary.get_data_section(&prog).unwrap_or(&[]);
-        let rodata_section = binary.get_rodata_section(&prog).unwrap_or(&[]);
-        let data_offset = 0;
-        let mut rodata_offset = data_section.len();
-        if rodata_offset % 2 == 1 {
-            // The .rodata section needs to be aligned at 16-bit boundary
-            rodata_offset += 1;
+            data_addr = mem.contents.as_ptr() as usize + data_offset;
+            rodata_addr = mem.contents.as_ptr() as usize + rodata_offset;
         }
-        mem.contents[..data_section.len()].copy_from_slice(data_section);
-        mem.contents[rodata_offset..rodata_offset + rodata_section.len()]
-            .copy_from_slice(rodata_section);
-        let mut text_offset = rodata_offset + rodata_section.len();
-        // The instructions we emit need to be aligned at 16-bit boundary
-        if text_offset % 2 == 1 {
-            text_offset += 1;
-        }
-        mem.offset = text_offset;
-        mem.text_offset = mem.offset;
-
-        debug!("JIT: data section length: {}", data_section.len());
-        debug!("JIT: rodata section length: {}", rodata_section.len());
-        debug!(
-            "JIT: text section offset: {} ({:#x})",
-            text_offset, text_offset
-        );
-
-        let data_addr = mem.contents.as_ptr() as usize + data_offset;
-        let rodata_addr = mem.contents.as_ptr() as usize + rodata_offset;
-
         debug!(
             "JIT: memory buffer address: {:#x}",
             mem.contents.as_ptr() as usize
@@ -205,9 +200,10 @@ impl JitCompiler {
         debug!("JIT: rodata section address: {:#x}", rodata_addr);
         debug!("JIT: data section address: {:#x}", data_addr);
 
-        prog_copy[..prog.len()].copy_from_slice(&prog);
-        resolve_data_rodata_relocations(prog_copy, data_addr, rodata_addr);
-        let mut text = binary.get_text_section(&prog_copy)?;
+        resolve_data_rodata_relocations(prog, data_addr, rodata_addr);
+
+        let binary: Box<dyn Binary> = Box::new(RawElfFileBinary::new(&prog)?);
+        let mut text = binary.get_text_section(&prog)?;
 
         let callee_saved_regs = vec![R4, R5, R6, R7, R8, R10, R11, LR];
         I::PushMultipleRegisters {
@@ -965,8 +961,7 @@ impl<'a> JitMemory<'a> {
     /// ```
     /// And then passing a reference to the contents of that struct to this function.
     pub fn new(
-        prog: &[u8],
-        prog_copy_buff: &mut [u8],
+        prog: &mut [u8],
         jit_memory_buff: &'a mut [u8],
         helpers: &HashMap<u32, ebpf::Helper>,
         use_mbuff: bool,
@@ -980,14 +975,7 @@ impl<'a> JitMemory<'a> {
         };
 
         let mut jit = JitCompiler::new(interpreter_variant);
-        jit.jit_compile(
-            &mut mem,
-            prog,
-            prog_copy_buff,
-            use_mbuff,
-            update_data_ptr,
-            helpers,
-        )?;
+        jit.jit_compile(&mut mem, prog, use_mbuff, update_data_ptr, helpers)?;
         jit.resolve_jumps(&mut mem)?;
         Self::log_program_contents(&mem.contents, mem.offset, mem.text_offset);
 
