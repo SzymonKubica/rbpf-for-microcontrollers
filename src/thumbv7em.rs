@@ -106,6 +106,11 @@ pub enum ThumbInstruction {
         rn: u8,
         rd: u8,
     },
+    Add12BitImmediate {
+        imm12: u16,
+        rn: u8,
+        rd: u8,
+    },
     Subtract3BitImmediate {
         imm3: u8,
         rn: u8,
@@ -471,8 +476,9 @@ impl ThumbInstruction {
                     .emit_into(mem);
                 }
 
-                if (*imm as u16) < (1 << 8) {
+                if (*imm as u16) < (1 << 8) && *rd < 8 {
                     const MOV_OPCODE: u8 = 0b0100;
+                    // For this one the only allowed registers are R0-R7
                     return thumb16::Imm8OneRegEncoding::new(BASIC, MOV_OPCODE, *imm as u8, *rd)
                         .emit(mem);
                 } else {
@@ -823,6 +829,10 @@ impl ThumbInstruction {
             ThumbInstruction::BlankInstruction => {
                 emit::<u16>(mem, 0);
                 Ok(())
+            }
+            ThumbInstruction::Add12BitImmediate { imm12, rn, rd } => {
+                let opcode = Thumb32OpcodeEncoding::new(0b10, 0b100000, 0b0);
+                return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16).emit(mem);
             }
         }
     }

@@ -81,6 +81,51 @@ impl Emittable for Imm12TwoRegsEncoding {
     }
 }
 
+pub struct Imm12SplitTwoRegsEncoding {
+    opcode: Thumb32OpcodeEncoding,
+    rn: u8,
+    rd: u8,
+    imm12: u16,
+}
+
+impl Imm12SplitTwoRegsEncoding {
+    pub fn new(opcode: Opcode, rn: u8, rd: u8, imm12: u16) -> Imm12SplitTwoRegsEncoding {
+        Imm12SplitTwoRegsEncoding {
+            opcode,
+            rn,
+            rd,
+            imm12,
+        }
+    }
+}
+
+impl Emittable for Imm12SplitTwoRegsEncoding {
+    fn emit(&self, mem: &mut JitMemory) -> Result<(), Error> {
+        let mut encoding = 0;
+        // We first break up the immediate into its parts
+        let i = (self.imm12 >> 11 & 0b1) as u32;
+        let imm3 = ((self.imm12 >> 8) & 0b111) as u32;
+        let imm8 = (self.imm12 & 0b11111111) as u32;
+
+        // Because of the endianness of the machine (we are in Little Endian)
+        // we need to encode the two words in reverse order.
+
+        // We first write the operands
+        encoding |= imm8;
+        encoding |= (self.rd as u32 & 0b1111) << 8;
+        encoding |= imm3 << 12;
+        encoding <<= 16;
+        encoding |= self.rn as u32 & 0b1111;
+        encoding |= i << 10;
+
+        // Now we get the encoded opcode and stamp it on top of the instruction
+        let opcode_encoding: u32 = self.opcode.into();
+        encoding |= opcode_encoding;
+        emit::<u32>(mem, encoding);
+        Ok(())
+    }
+}
+
 pub struct Imm12OneRegEncoding {
     opcode: Thumb32OpcodeEncoding,
     rn: u8,

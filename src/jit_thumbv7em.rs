@@ -58,19 +58,17 @@ const REGISTER_MAP_SIZE: usize = 11;
 // in the eBPF ISA, which specifies e.g. that SP needs to be the register 10
 // whereas in ARMv7-eM it is R13.
 const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
-    R0, // 0  return value
-    R1, // 1  arg 1
-    R2, // 2  arg 2
-    R3, // 3  arg 3
-    R4, // 4  arg 4
-    R5, // 5  arg 5
-    R6, // 6  callee-saved
-    R7, // 7  callee-saved
-    R8, // 8  callee-saved
-    R9, // 9 callee-saved
-    SP, // 10 stack pointer (eBPF specification requires that SP is in register 10)
-        // R10 and R11 are used to compute store a constant pointer to mem and to compute offset for
-        // LD_ABS_* and LD_IND_* operations, so they are not mapped to any eBPF register.
+    R0,  // 0  return value
+    R1,  // 1  arg 1
+    R2,  // 2  arg 2
+    R3,  // 3  arg 3
+    R4,  // 4  arg 4
+    R5,  // 5  arg 5
+    R6,  // 6  callee-saved
+    R7,  // 7  callee-saved
+    R8,  // 8  callee-saved
+    R9,  // 9 callee-saved
+    R11, // 10 stack pointer (eBPF specification requires that SP is in register 10)
 ];
 
 /// The register used by instructions using immediate operands that don't have
@@ -253,7 +251,7 @@ impl JitCompiler {
         .emit_into(mem);
 
         // Allocate stack space
-        // Subtract eBPF stack size from STACK pointer. Given that our instruction
+        // Subtract eBPF stack size from stack pointer. Given that our instruction
         // allows for shifting the stack by at most 4*127 bytes at once, we need
         // to do this twice to achieve the stack size of 512 used by eBPF.
         let offset = ebpf::STACK_SIZE as u16 / 2;
@@ -327,36 +325,20 @@ impl JitCompiler {
                 // BPF_STX class
                 ebpf::ST_B_REG => I::StoreRegisterByteImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
                 ebpf::ST_H_REG => I::StoreRegisterHalfwordImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
-                ebpf::ST_W_REG => I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
-                ebpf::ST_DW_REG => error_32_bit_arch()?,
+                ebpf::ST_W_REG | ebpf::ST_DW_REG  => I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: src }.emit_into(mem)?,
                 ebpf::ST_W_XADD => unimplemented!(),
                 ebpf::ST_DW_XADD => unimplemented!(),
 
                 // BPF_ALU and BPF_ALU64 classes, we treat both of them in the
                 // same way as our architecture is 32bit
                 ebpf::ADD32_IMM | ebpf::ADD64_IMM => {
-                    // Given that we are running on a 32 bit architecture, we treat
-                    // both 32 and 64 bit instructions the same but fail to jit if the operand
-                    // doesn't fit into 32 bits.
-                    if insn.imm >> 8 > 0 {
-                        Err(Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "[JIT] Instruction with immediate {:#x} which does not fit into 8 bits.",
-                                insn.imm
-                            ),
-                        ))?;
-                    }
-
-                    // The compiler sometimes emits add with negative immediates
+                    // The eBPF compiler sometimes emits add with negative immediates
                     // se we need to handle it here:
                     if insn.imm < 0 {
                         let imm = -1 * insn.imm;
                         I::Subtract8BitImmediate { rd: dst, imm8: imm as u8 }.emit_into(mem)?;
                     } else {
-                        // TODO: make add pick the right instruction based on the size
-                        // of the immediate and register numbers.
-                        I::Add8BitImmediate { rd: dst, imm8: insn.imm as u8 }.emit_into(mem)?;
+                        I::Add12BitImmediate { imm12: insn.imm as u16, rn: dst, rd: dst } .emit_into(mem)?;
                     }
                 }
                 ebpf::ADD32_REG | ebpf::ADD64_REG => {
@@ -456,7 +438,11 @@ impl JitCompiler {
                     // (it is only 32 bits long). Because of this in logical
                     // / arithmetic shift instructions we mod the shift value by
                     // 32 so that the register never gets fully flushed
-                    I::LogicalShiftLeftImmediate { imm5: (insn.imm % 32) as u8, rm: dst, rd: dst }.emit_into(mem)?;
+                    if insn.imm == 32 {
+                        I::NoOperationHint.emit_into(mem)?;
+                    } else {
+                        I::LogicalShiftLeftImmediate { imm5: (insn.imm % 32) as u8, rm: dst, rd: dst }.emit_into(mem)?;
+                    }
                 }
                 ebpf::LSH32_REG | ebpf::LSH64_REG => {
                     I::LogicalShiftLeft { rm: src, rd: dst }.emit_into(mem)?;
@@ -1022,7 +1008,12 @@ impl<'a> JitMemory<'a> {
 
     fn log_program_contents(jit_prog: &[u8], offset: usize, text_offset: usize) {
         let mut prog_str: String = String::new();
-        for (i, b) in jit_prog.iter().skip(text_offset).take(offset-text_offset).enumerate() {
+        for (i, b) in jit_prog
+            .iter()
+            .skip(text_offset)
+            .take(offset - text_offset)
+            .enumerate()
+        {
             prog_str.push_str(&format!("{:02x}", *b));
             if i % 4 == 3 {
                 prog_str.push_str("\n");
