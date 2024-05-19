@@ -34,10 +34,10 @@ extern crate byteorder;
 extern crate combine;
 #[cfg(feature = "std")]
 extern crate core;
+extern crate goblin;
 extern crate libm;
 extern crate log;
 extern crate time;
-extern crate goblin;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;
@@ -224,7 +224,22 @@ impl<'a> EbpfVmMbuff<'a> {
         // We need to dynamically define the verifier in this way as the
         // closures aren't allowed to capture the interpreter variant from the
         // environment.
-        let verifier: fn(prog: &[u8]) -> Result<(), Error> = match interpreter_variant {
+
+        Ok(EbpfVmMbuff {
+            prog,
+            verifier: Self::get_verifier(interpreter_variant),
+            jit: None,
+            #[cfg(jit)]
+            jit: None,
+            #[cfg(feature = "cranelift")]
+            cranelift_prog: None,
+            helpers: BTreeMap::new(),
+            interpreter_variant,
+        })
+    }
+
+    pub fn get_verifier(interpreter_variant: InterpreterVariant) -> fn(&[u8]) -> Result<(), Error> {
+        match interpreter_variant {
             InterpreterVariant::Default => {
                 |prog| verifier::check(prog, InterpreterVariant::Default)
             }
@@ -237,19 +252,7 @@ impl<'a> EbpfVmMbuff<'a> {
             InterpreterVariant::RawObjectFile => {
                 |prog| verifier::check(prog, InterpreterVariant::RawObjectFile)
             }
-        };
-
-        Ok(EbpfVmMbuff {
-            prog,
-            verifier,
-            jit: None,
-            #[cfg(jit)]
-            jit: None,
-            #[cfg(feature = "cranelift")]
-            cranelift_prog: None,
-            helpers: BTreeMap::new(),
-            interpreter_variant,
-        })
+        }
     }
 
     /// Load a new eBPF program into the virtual machine instance.
@@ -280,6 +283,13 @@ impl<'a> EbpfVmMbuff<'a> {
     /// Allows for verifying the program that is already loaded into the virtual machine.
     pub fn verify_loaded_program(&self) -> Result<(), Error> {
         (self.verifier)(self.prog.unwrap())
+    }
+
+    pub fn verify_program(
+        interpreter_variant: InterpreterVariant,
+        program: &[u8],
+    ) -> Result<(), Error> {
+        (Self::get_verifier(interpreter_variant))(program)
     }
 
     /// Allows for verifying the program that is already loaded into the VM only
@@ -618,7 +628,6 @@ impl<'a> EbpfVmMbuff<'a> {
         }
     }
 
-
     pub unsafe fn execute_program_jit(
         &self,
         mem: &mut [u8],
@@ -636,12 +645,12 @@ impl<'a> EbpfVmMbuff<'a> {
         // need to indicate to the JIT at which offset in the mbuff mem_ptr and mem_ptr + mem.len()
         // should be stored; this is what happens with struct EbpfVmFixedMbuff.
         match &self.jit {
-            Some(jit) => Ok(jit.get_prog()(
-                mbuff.as_ptr() as *mut u8,
-                mbuff.len(),
-                mem_ptr,
-                mem.len(),
-            ).into()),
+            Some(jit) => {
+                Ok(
+                    jit.get_prog()(mbuff.as_ptr() as *mut u8, mbuff.len(), mem_ptr, mem.len())
+                        .into(),
+                )
+            }
             None => Err(Error::new(
                 ErrorKind::Other,
                 "Error: program has not been JIT-compiled",
