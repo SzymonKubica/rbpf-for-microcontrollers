@@ -14,7 +14,10 @@
 //! <https://www.kernel.org/doc/Documentation/networking/filter.txt>, or for a shorter version of
 //! the list of the operation codes: <https://github.com/iovisor/bpf-docs/blob/master/eBPF.md>
 
+use core::fmt::{self, Debug, Formatter};
+
 use byteorder::{ByteOrder, LittleEndian};
+use log::debug;
 use stdlib::collections::Vec;
 
 /// Maximum number of instructions in an eBPF program.
@@ -454,6 +457,49 @@ pub struct Insn {
     pub imm: i32,
 }
 
+#[repr(C, packed)]
+pub struct InsnFast<'a> {
+    prog_ref: &'a [u8],
+}
+
+impl<'a> InsnFast<'a> {
+    #[inline]
+    pub fn opc(&self) -> u8 {
+        self.prog_ref[0]
+    }
+    #[inline]
+    pub fn dst(&self) -> u8 {
+        self.prog_ref[1] & 0x0f
+    }
+    #[inline]
+    pub fn src(&self) -> u8 {
+        (self.prog_ref[1] & 0xf0) >> 4
+    }
+    #[inline]
+    pub fn off(&self) -> i16 {
+        LittleEndian::read_i16(&self.prog_ref[2..])
+    }
+
+    #[inline]
+    pub fn imm(&self) -> i32 {
+        LittleEndian::read_i32(&self.prog_ref[4..])
+    }
+}
+
+impl Debug for InsnFast<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "InsnFast {{ opc: {:?}, dst: {:?}, src: {:?}, off: {:?}, imm: {:?} }}",
+            self.opc(),
+            self.dst(),
+            self.src(),
+            self.off(),
+            self.imm()
+        )
+    }
+}
+
 impl Insn {
     /// Turn an `Insn` back into an array of bytes.
     ///
@@ -570,6 +616,17 @@ pub fn get_insn(prog: &[u8], idx: usize) -> Insn {
         off: LittleEndian::read_i16(&prog[(INSN_SIZE * idx + 2)..]),
         imm: LittleEndian::read_i32(&prog[(INSN_SIZE * idx + 4)..]),
     }
+}
+
+pub fn get_insn_fast(prog: &[u8], idx: usize) -> InsnFast {
+    if (idx + 1) * INSN_SIZE > prog.len() {
+        panic!(
+            "Error: cannot reach instruction at index {:?} in program containing {:?} bytes",
+            idx,
+            prog.len()
+        );
+    }
+    InsnFast { prog_ref: &prog[INSN_SIZE * idx..] }
 }
 
 /// Return a vector of `struct Insn` built from a program.
