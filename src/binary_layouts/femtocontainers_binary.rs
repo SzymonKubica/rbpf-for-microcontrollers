@@ -163,6 +163,7 @@ pub trait LddwdrInstructionHandler {
 }
 
 impl LddwdrInstructionHandler for FemtoContainersBinary {
+    #[inline(always)]
     fn handle_lddwd_instruction(
         &self,
         program: &[u8],
@@ -181,6 +182,7 @@ impl LddwdrInstructionHandler for FemtoContainersBinary {
         Ok(())
     }
 
+    #[inline(always)]
     fn handle_lddwr_instruction(
         &self,
         program: &[u8],

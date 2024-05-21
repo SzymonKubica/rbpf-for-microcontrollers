@@ -251,7 +251,6 @@ pub fn execute_program<'a>(
             }
 
             Opcode::Opcode_LDDWR_IMM => {
-                let prev_ptr = insn_ptr - ebpf::INSN_SIZE;
                 binary.handle_lddwr_instruction(
                     prog,
                     &insn,
