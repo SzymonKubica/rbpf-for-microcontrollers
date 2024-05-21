@@ -1,7 +1,7 @@
 use stdlib::collections::Vec;
 use stdlib::{Error, ErrorKind};
 
-use crate::ebpf::{self, Insn};
+use crate::ebpf::{self, Insn, InsnLike};
 
 use super::{Binary, CallInstructionHandler, SectionAccessor, LddwdrInstructionHandler};
 
@@ -30,19 +30,20 @@ impl CallInstructionHandler for TextSectionOnlyBinary {
         &self,
         _program: &[u8],
         _insn_ptr: &mut usize,
-        insn: Insn,
+        insn: &dyn InsnLike,
         reg: &mut [u64],
         helpers: &alloc::collections::BTreeMap<u32, ebpf::Helper>,
         _return_address_stack: &mut Vec<usize>,
+        insn_ptr_step_size: usize,
     ) -> Result<(), Error> {
-        if let Some(function) = helpers.get(&(insn.imm as u32)) {
+        if let Some(function) = helpers.get(&(insn.imm() as u32)) {
             reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
         } else {
             Err(Error::new(
                 ErrorKind::Other,
                 format!(
                     "Error: unknown helper function (id: {:#x})",
-                    insn.imm as u32
+                    insn.imm() as u32
                 ),
             ))?;
         }

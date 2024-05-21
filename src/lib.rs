@@ -35,6 +35,8 @@ extern crate combine;
 #[cfg(feature = "std")]
 extern crate core;
 extern crate goblin;
+extern crate num;
+extern crate num_derive;
 extern crate libm;
 extern crate log;
 extern crate time;

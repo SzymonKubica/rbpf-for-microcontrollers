@@ -22,7 +22,7 @@
 //!   located in the loaded program buffer.
 //! - handling funtion calls and load/store instruction is layout specific
 
-use crate::ebpf::{self, Insn};
+use crate::ebpf::{self, Insn, InsnLike};
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use stdlib::Error;
@@ -63,10 +63,11 @@ pub trait CallInstructionHandler {
         &self,
         program: &[u8],
         insn_ptr: &mut usize,
-        insn: Insn,
+        insn: &dyn InsnLike,
         reg: &mut [u64],
         helpers: &BTreeMap<u32, ebpf::Helper>,
         return_address_stack: &mut Vec<usize>,
+        insn_ptr_step_size: usize,
     ) -> Result<(), Error>;
 }
 

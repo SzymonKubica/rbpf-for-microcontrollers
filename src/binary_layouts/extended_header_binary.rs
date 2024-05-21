@@ -1,6 +1,6 @@
 use log::debug;
 
-use crate::ebpf::{self, Insn};
+use crate::ebpf::{self, Insn, InsnLike};
 
 use super::{
     common::ElfSection, Binary, CallInstructionHandler, LddwdrInstructionHandler, SectionAccessor,
@@ -127,12 +127,13 @@ impl CallInstructionHandler for ExtendedHeaderBinary {
         &self,
         _program: &[u8],
         insn_ptr: &mut usize,
-        insn: crate::ebpf::Insn,
+        insn: &dyn InsnLike,
         reg: &mut [u64],
         helpers: &alloc::collections::BTreeMap<u32, crate::ebpf::Helper>,
         return_address_stack: &mut Vec<usize>,
+        insn_ptr_step_size: usize,
     ) -> Result<(), Error> {
-        match insn.src {
+        match insn.src() {
             0 => {
                 // First we check if we have a custom relocation at this instruction
                 if let Some(reloc) = self
@@ -147,14 +148,14 @@ impl CallInstructionHandler for ExtendedHeaderBinary {
 
                     *insn_ptr = (reloc.function_text_offset / 8) as usize;
                 // Then we inspect if the immediate indicates a helper function
-                } else if let Some(function) = helpers.get(&(insn.imm as u32)) {
+                } else if let Some(function) = helpers.get(&(insn.imm() as u32)) {
                     reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
                 } else {
                     Err(Error::new(
                         ErrorKind::Other,
                         format!(
                             "Error: unknown helper function (id: {:#x})",
-                            insn.imm as u32
+                            insn.imm() as u32
                         ),
                     ))?;
                 }
@@ -163,14 +164,14 @@ impl CallInstructionHandler for ExtendedHeaderBinary {
                 // Here the source register 1 indicates that we are making
                 // a call relative to the current instruction pointer
                 return_address_stack.push(*insn_ptr);
-                *insn_ptr = ((*insn_ptr as i32 + insn.imm) as usize) as usize;
+                *insn_ptr = ((*insn_ptr as i32 + insn.imm() * insn_ptr_step_size as i32) as usize) as usize;
             }
             _ => {
                 Err(Error::new(
                     ErrorKind::Other,
                     format!(
                         "Error: invalid CALL src register value: (src: {})",
-                        insn.src as u32
+                        insn.src() as u32
                     ),
                 ))?;
             }
@@ -183,18 +184,17 @@ impl LddwdrInstructionHandler for ExtendedHeaderBinary {
     fn handle_lddwd_instruction(
         &self,
         program: &[u8],
-        insn: Insn,
+        insn: &dyn InsnLike,
+        next_insn: &dyn InsnLike,
         dst: usize,
         insn_ptr: &mut usize,
-        text_section: &[u8],
         reg: &mut [u64],
     ) -> Result<(), Error> {
-        let next_insn = ebpf::get_insn(text_section, *insn_ptr);
-        *insn_ptr += 1;
+        *insn_ptr += ebpf::INSN_SIZE;
         reg[dst] = program.as_ptr() as u64
             + self.data_section.offset as u64
-            + ((insn.imm as u32) as u64)
-            + ((next_insn.imm as u64) << 32);
+            + ((insn.imm() as u32) as u64)
+            + ((next_insn.imm() as u64) << 32);
 
         Ok(())
     }
@@ -202,18 +202,17 @@ impl LddwdrInstructionHandler for ExtendedHeaderBinary {
     fn handle_lddwr_instruction(
         &self,
         program: &[u8],
-        insn: Insn,
+        insn: &dyn InsnLike,
+        next_insn: &dyn InsnLike,
         dst: usize,
         insn_ptr: &mut usize,
-        text_section: &[u8],
         reg: &mut [u64],
     ) -> Result<(), Error> {
-        let next_insn = ebpf::get_insn(text_section, *insn_ptr);
-        *insn_ptr += 1;
+        *insn_ptr += ebpf::INSN_SIZE;
         reg[dst] = program.as_ptr() as u64
             + self.rodata_section.offset as u64
-            + ((insn.imm as u32) as u64)
-            + ((next_insn.imm as u64) << 32);
+            + ((insn.imm() as u32) as u64)
+            + ((next_insn.imm() as u64) << 32);
         Ok(())
     }
 }

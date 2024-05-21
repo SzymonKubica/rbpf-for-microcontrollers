@@ -18,6 +18,7 @@ use core::fmt::{self, Debug, Formatter};
 
 use byteorder::{ByteOrder, LittleEndian};
 use log::debug;
+use num_derive::FromPrimitive;
 use stdlib::collections::Vec;
 
 /// Maximum number of instructions in an eBPF program.
@@ -429,6 +430,263 @@ pub const TAIL_CALL: u8 = BPF_JMP | BPF_X | BPF_CALL;
 /// BPF opcode: `exit` /// `return r0`.
 pub const EXIT: u8 = BPF_JMP | BPF_EXIT;
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, FromPrimitive)]
+pub enum Opcode {
+    // We need to use the Opcode_* naming convention so that it doesn't clash
+    // with the public constants used by the default interpreter.
+    /// BPF opcode: `ldabsb src, dst, imm`.
+    Opcode_LD_ABS_B = (BPF_LD | BPF_ABS | BPF_B) as isize,
+    /// BPF opcode: `ldabsh src, dst, imm`.
+    Opcode_LD_ABS_H = (BPF_LD | BPF_ABS | BPF_H) as isize,
+    /// BPF opcode: `ldabsw src, dst, imm`.
+    Opcode_LD_ABS_W = (BPF_LD | BPF_ABS | BPF_W) as isize,
+    /// BPF opcode: `ldabsdw src, dst, imm`.
+    Opcode_LD_ABS_DW = (BPF_LD | BPF_ABS | BPF_DW) as isize,
+    /// BPF opcode: `ldindb src, dst, imm`.
+    Opcode_LD_IND_B = (BPF_LD | BPF_IND | BPF_B) as isize,
+    /// BPF opcode: `ldindh src, dst, imm`.
+    Opcode_LD_IND_H = (BPF_LD | BPF_IND | BPF_H) as isize,
+    /// BPF opcode: `ldindw src, dst, imm`.
+    Opcode_LD_IND_W = (BPF_LD | BPF_IND | BPF_W) as isize,
+    /// BPF opcode: `ldinddw src, dst, imm`.
+    Opcode_LD_IND_DW = (BPF_LD | BPF_IND | BPF_DW) as isize,
+    /// BPF opcode: `lddw dst, imm` /// `dst = imm`.
+    Opcode_LD_DW_IMM = (BPF_LD | BPF_IMM | BPF_DW) as isize,
+    /// BPF opcode: `ldxb dst, [src + off]` /// `dst = (src + off) as u8`.
+    Opcode_LD_B_REG = (BPF_LDX | BPF_MEM | BPF_B) as isize,
+    /// BPF opcode: `ldxh dst, [src + off]` /// `dst = (src + off) as u16`.
+    Opcode_LD_H_REG = (BPF_LDX | BPF_MEM | BPF_H) as isize,
+    /// BPF opcode: `ldxw dst, [src + off]` /// `dst = (src + off) as u32`.
+    Opcode_LD_W_REG = (BPF_LDX | BPF_MEM | BPF_W) as isize,
+    /// BPF opcode: `ldxdw dst, [src + off]` /// `dst = (src + off) as u64`.
+    Opcode_LD_DW_REG = (BPF_LDX | BPF_MEM | BPF_DW) as isize,
+    /// LDDW from data section
+    Opcode_LDDWD_IMM = 0xB8,
+    /// LDDW from rodata section
+    Opcode_LDDWR_IMM = 0xD8,
+    /// BPF opcode: `stb [dst + off], imm` /// `(dst + offset) as u8 = imm`.
+    Opcode_ST_B_IMM = (BPF_ST | BPF_MEM | BPF_B) as isize,
+    /// BPF opcode: `sth [dst + off], imm` /// `(dst + offset) as u16 = imm`.
+    Opcode_ST_H_IMM = (BPF_ST | BPF_MEM | BPF_H) as isize,
+    /// BPF opcode: `stw [dst + off], imm` /// `(dst + offset) as u32 = imm`.
+    Opcode_ST_W_IMM = (BPF_ST | BPF_MEM | BPF_W) as isize,
+    /// BPF opcode: `stdw [dst + off], imm` /// `(dst + offset) as u64 = imm`.
+    Opcode_ST_DW_IMM = (BPF_ST | BPF_MEM | BPF_DW) as isize,
+    /// BPF opcode: `stxb [dst + off], src` /// `(dst + offset) as u8 = src`.
+    Opcode_ST_B_REG = (BPF_STX | BPF_MEM | BPF_B) as isize,
+    /// BPF opcode: `stxh [dst + off], src` /// `(dst + offset) as u16 = src`.
+    Opcode_ST_H_REG = (BPF_STX | BPF_MEM | BPF_H) as isize,
+    /// BPF opcode: `stxw [dst + off], src` /// `(dst + offset) as u32 = src`.
+    Opcode_ST_W_REG = (BPF_STX | BPF_MEM | BPF_W) as isize,
+    /// BPF opcode: `stxdw [dst + off], src` /// `(dst + offset) as u64 = src`.
+    Opcode_ST_DW_REG = (BPF_STX | BPF_MEM | BPF_DW) as isize,
+    /// BPF opcode: `stxxaddw [dst + off], src`.
+    Opcode_ST_W_XADD = (BPF_STX | BPF_XADD | BPF_W) as isize,
+    /// BPF opcode: `stxxadddw [dst + off], src`.
+    Opcode_ST_DW_XADD = (BPF_STX | BPF_XADD | BPF_DW) as isize,
+    /// BPF opcode: `add32 dst, imm` /// `dst += imm`.
+    Opcode_ADD32_IMM = (BPF_ALU | BPF_K | BPF_ADD) as isize,
+    /// BPF opcode: `add32 dst, src` /// `dst += src`.
+    Opcode_ADD32_REG = (BPF_ALU | BPF_X | BPF_ADD) as isize,
+    /// BPF opcode: `sub32 dst, imm` /// `dst -= imm`.
+    Opcode_SUB32_IMM = (BPF_ALU | BPF_K | BPF_SUB) as isize,
+    /// BPF opcode: `sub32 dst, src` /// `dst -= src`.
+    Opcode_SUB32_REG = (BPF_ALU | BPF_X | BPF_SUB) as isize,
+    /// BPF opcode: `mul32 dst, imm` /// `dst *= imm`.
+    Opcode_MUL32_IMM = (BPF_ALU | BPF_K | BPF_MUL) as isize,
+    /// BPF opcode: `mul32 dst, src` /// `dst *= src`.
+    Opcode_MUL32_REG = (BPF_ALU | BPF_X | BPF_MUL) as isize,
+    /// BPF opcode: `div32 dst, imm` /// `dst /= imm`.
+    Opcode_DIV32_IMM = (BPF_ALU | BPF_K | BPF_DIV) as isize,
+    /// BPF opcode: `div32 dst, src` /// `dst /= src`.
+    Opcode_DIV32_REG = (BPF_ALU | BPF_X | BPF_DIV) as isize,
+    /// BPF opcode: `or32 dst, imm` /// `dst |= imm`.
+    Opcode_OR32_IMM = (BPF_ALU | BPF_K | BPF_OR) as isize,
+    /// BPF opcode: `or32 dst, src` /// `dst |= src`.
+    Opcode_OR32_REG = (BPF_ALU | BPF_X | BPF_OR) as isize,
+    /// BPF opcode: `and32 dst, imm` /// `dst &= imm`.
+    Opcode_AND32_IMM = (BPF_ALU | BPF_K | BPF_AND) as isize,
+    /// BPF opcode: `and32 dst, src` /// `dst &= src`.
+    Opcode_AND32_REG = (BPF_ALU | BPF_X | BPF_AND) as isize,
+    /// BPF opcode: `lsh32 dst, imm` /// `dst <<= imm`.
+    Opcode_LSH32_IMM = (BPF_ALU | BPF_K | BPF_LSH) as isize,
+    /// BPF opcode: `lsh32 dst, src` /// `dst <<= src`.
+    Opcode_LSH32_REG = (BPF_ALU | BPF_X | BPF_LSH) as isize,
+    /// BPF opcode: `rsh32 dst, imm` /// `dst >>= imm`.
+    Opcode_RSH32_IMM = (BPF_ALU | BPF_K | BPF_RSH) as isize,
+    /// BPF opcode: `rsh32 dst, src` /// `dst >>= src`.
+    Opcode_RSH32_REG = (BPF_ALU | BPF_X | BPF_RSH) as isize,
+    /// BPF opcode: `neg32 dst` /// `dst = -dst`.
+    Opcode_NEG32 = (BPF_ALU | BPF_NEG) as isize,
+    /// BPF opcode: `mod32 dst, imm` /// `dst %= imm`.
+    Opcode_MOD32_IMM = (BPF_ALU | BPF_K | BPF_MOD) as isize,
+    /// BPF opcode: `mod32 dst, src` /// `dst %= src`.
+    Opcode_MOD32_REG = (BPF_ALU | BPF_X | BPF_MOD) as isize,
+    /// BPF opcode: `xor32 dst, imm` /// `dst ^= imm`.
+    Opcode_XOR32_IMM = (BPF_ALU | BPF_K | BPF_XOR) as isize,
+    /// BPF opcode: `xor32 dst, src` /// `dst ^= src`.
+    Opcode_XOR32_REG = (BPF_ALU | BPF_X | BPF_XOR) as isize,
+    /// BPF opcode: `mov32 dst, imm` /// `dst = imm`.
+    Opcode_MOV32_IMM = (BPF_ALU | BPF_K | BPF_MOV) as isize,
+    /// BPF opcode: `mov32 dst, src` /// `dst = src`.
+    Opcode_MOV32_REG = (BPF_ALU | BPF_X | BPF_MOV) as isize,
+    /// BPF opcode: `arsh32 dst, imm` /// `dst >>= imm (arithmetic)`.
+    Opcode_ARSH32_IMM = (BPF_ALU | BPF_K | BPF_ARSH) as isize,
+    /// BPF opcode: `arsh32 dst, src` /// `dst >>= src (arithmetic)`.
+    Opcode_ARSH32_REG = (BPF_ALU | BPF_X | BPF_ARSH) as isize,
+    /// BPF opcode: `le dst` /// `dst = htole<imm>(dst), with imm in {16, 32, 64}`.
+    Opcode_LE = (BPF_ALU | BPF_K | BPF_END) as isize,
+    /// BPF opcode: `be dst` /// `dst = htobe<imm>(dst), with imm in {16, 32, 64}`.
+    Opcode_BE = (BPF_ALU | BPF_X | BPF_END) as isize,
+    /// BPF opcode: `add64 dst, imm` /// `dst += imm`.
+    Opcode_ADD64_IMM = (BPF_ALU64 | BPF_K | BPF_ADD) as isize,
+    /// BPF opcode: `add64 dst, src` /// `dst += src`.
+    Opcode_ADD64_REG = (BPF_ALU64 | BPF_X | BPF_ADD) as isize,
+    /// BPF opcode: `sub64 dst, imm` /// `dst -= imm`.
+    Opcode_SUB64_IMM = (BPF_ALU64 | BPF_K | BPF_SUB) as isize,
+    /// BPF opcode: `sub64 dst, src` /// `dst -= src`.
+    Opcode_SUB64_REG = (BPF_ALU64 | BPF_X | BPF_SUB) as isize,
+    /// BPF opcode: `div64 dst, imm` /// `dst /= imm`.
+    Opcode_MUL64_IMM = (BPF_ALU64 | BPF_K | BPF_MUL) as isize,
+    /// BPF opcode: `div64 dst, src` /// `dst /= src`.
+    Opcode_MUL64_REG = (BPF_ALU64 | BPF_X | BPF_MUL) as isize,
+    /// BPF opcode: `div64 dst, imm` /// `dst /= imm`.
+    Opcode_DIV64_IMM = (BPF_ALU64 | BPF_K | BPF_DIV) as isize,
+    /// BPF opcode: `div64 dst, src` /// `dst /= src`.
+    Opcode_DIV64_REG = (BPF_ALU64 | BPF_X | BPF_DIV) as isize,
+    /// BPF opcode: `or64 dst, imm` /// `dst |= imm`.
+    Opcode_OR64_IMM = (BPF_ALU64 | BPF_K | BPF_OR) as isize,
+    /// BPF opcode: `or64 dst, src` /// `dst |= src`.
+    Opcode_OR64_REG = (BPF_ALU64 | BPF_X | BPF_OR) as isize,
+    /// BPF opcode: `and64 dst, imm` /// `dst &= imm`.
+    Opcode_AND64_IMM = (BPF_ALU64 | BPF_K | BPF_AND) as isize,
+    /// BPF opcode: `and64 dst, src` /// `dst &= src`.
+    Opcode_AND64_REG = (BPF_ALU64 | BPF_X | BPF_AND) as isize,
+    /// BPF opcode: `lsh64 dst, imm` /// `dst <<= imm`.
+    Opcode_LSH64_IMM = (BPF_ALU64 | BPF_K | BPF_LSH) as isize,
+    /// BPF opcode: `lsh64 dst, src` /// `dst <<= src`.
+    Opcode_LSH64_REG = (BPF_ALU64 | BPF_X | BPF_LSH) as isize,
+    /// BPF opcode: `rsh64 dst, imm` /// `dst >>= imm`.
+    Opcode_RSH64_IMM = (BPF_ALU64 | BPF_K | BPF_RSH) as isize,
+    /// BPF opcode: `rsh64 dst, src` /// `dst >>= src`.
+    Opcode_RSH64_REG = (BPF_ALU64 | BPF_X | BPF_RSH) as isize,
+    /// BPF opcode: `neg64 dst, imm` /// `dst = -dst`.
+    Opcode_NEG64 = (BPF_ALU64 | BPF_NEG) as isize,
+    /// BPF opcode: `mod64 dst, imm` /// `dst %= imm`.
+    Opcode_MOD64_IMM = (BPF_ALU64 | BPF_K | BPF_MOD) as isize,
+    /// BPF opcode: `mod64 dst, src` /// `dst %= src`.
+    Opcode_MOD64_REG = (BPF_ALU64 | BPF_X | BPF_MOD) as isize,
+    /// BPF opcode: `xor64 dst, imm` /// `dst ^= imm`.
+    Opcode_XOR64_IMM = (BPF_ALU64 | BPF_K | BPF_XOR) as isize,
+    /// BPF opcode: `xor64 dst, src` /// `dst ^= src`.
+    Opcode_XOR64_REG = (BPF_ALU64 | BPF_X | BPF_XOR) as isize,
+    /// BPF opcode: `mov64 dst, imm` /// `dst = imm`.
+    Opcode_MOV64_IMM = (BPF_ALU64 | BPF_K | BPF_MOV) as isize,
+    /// BPF opcode: `mov64 dst, src` /// `dst = src`.
+    Opcode_MOV64_REG = (BPF_ALU64 | BPF_X | BPF_MOV) as isize,
+    /// BPF opcode: `arsh64 dst, imm` /// `dst >>= imm (arithmetic)`.
+    Opcode_ARSH64_IMM = (BPF_ALU64 | BPF_K | BPF_ARSH) as isize,
+    /// BPF opcode: `arsh64 dst, src` /// `dst >>= src (arithmetic)`.
+    Opcode_ARSH64_REG = (BPF_ALU64 | BPF_X | BPF_ARSH) as isize,
+    /// BPF opcode: `ja +off` /// `PC += off`.
+    Opcode_JA = (BPF_JMP | BPF_JA) as isize,
+    /// BPF opcode: `jeq dst, imm, +off` /// `PC += off if dst == imm`.
+    Opcode_JEQ_IMM = (BPF_JMP | BPF_K | BPF_JEQ) as isize,
+    /// BPF opcode: `jeq dst, src, +off` /// `PC += off if dst == src`.
+    Opcode_JEQ_REG = (BPF_JMP | BPF_X | BPF_JEQ) as isize,
+    /// BPF opcode: `jgt dst, imm, +off` /// `PC += off if dst > imm`.
+    Opcode_JGT_IMM = (BPF_JMP | BPF_K | BPF_JGT) as isize,
+    /// BPF opcode: `jgt dst, src, +off` /// `PC += off if dst > src`.
+    Opcode_JGT_REG = (BPF_JMP | BPF_X | BPF_JGT) as isize,
+    /// BPF opcode: `jge dst, imm, +off` /// `PC += off if dst >= imm`.
+    Opcode_JGE_IMM = (BPF_JMP | BPF_K | BPF_JGE) as isize,
+    /// BPF opcode: `jge dst, src, +off` /// `PC += off if dst >= src`.
+    Opcode_JGE_REG = (BPF_JMP | BPF_X | BPF_JGE) as isize,
+    /// BPF opcode: `jlt dst, imm, +off` /// `PC += off if dst < imm`.
+    Opcode_JLT_IMM = (BPF_JMP | BPF_K | BPF_JLT) as isize,
+    /// BPF opcode: `jlt dst, src, +off` /// `PC += off if dst < src`.
+    Opcode_JLT_REG = (BPF_JMP | BPF_X | BPF_JLT) as isize,
+    /// BPF opcode: `jle dst, imm, +off` /// `PC += off if dst <= imm`.
+    Opcode_JLE_IMM = (BPF_JMP | BPF_K | BPF_JLE) as isize,
+    /// BPF opcode: `jle dst, src, +off` /// `PC += off if dst <= src`.
+    Opcode_JLE_REG = (BPF_JMP | BPF_X | BPF_JLE) as isize,
+    /// BPF opcode: `jset dst, imm, +off` /// `PC += off if dst & imm`.
+    Opcode_JSET_IMM = (BPF_JMP | BPF_K | BPF_JSET) as isize,
+    /// BPF opcode: `jset dst, src, +off` /// `PC += off if dst & src`.
+    Opcode_JSET_REG = (BPF_JMP | BPF_X | BPF_JSET) as isize,
+    /// BPF opcode: `jne dst, imm, +off` /// `PC += off if dst != imm`.
+    Opcode_JNE_IMM = (BPF_JMP | BPF_K | BPF_JNE) as isize,
+    /// BPF opcode: `jne dst, src, +off` /// `PC += off if dst != src`.
+    Opcode_JNE_REG = (BPF_JMP | BPF_X | BPF_JNE) as isize,
+    /// BPF opcode: `jsgt dst, imm, +off` /// `PC += off if dst > imm (signed)`.
+    Opcode_JSGT_IMM = (BPF_JMP | BPF_K | BPF_JSGT) as isize,
+    /// BPF opcode: `jsgt dst, src, +off` /// `PC += off if dst > src (signed)`.
+    Opcode_JSGT_REG = (BPF_JMP | BPF_X | BPF_JSGT) as isize,
+    /// BPF opcode: `jsge dst, imm, +off` /// `PC += off if dst >= imm (signed)`.
+    Opcode_JSGE_IMM = (BPF_JMP | BPF_K | BPF_JSGE) as isize,
+    /// BPF opcode: `jsge dst, src, +off` /// `PC += off if dst >= src (signed)`.
+    Opcode_JSGE_REG = (BPF_JMP | BPF_X | BPF_JSGE) as isize,
+    /// BPF opcode: `jslt dst, imm, +off` /// `PC += off if dst < imm (signed)`.
+    Opcode_JSLT_IMM = (BPF_JMP | BPF_K | BPF_JSLT) as isize,
+    /// BPF opcode: `jslt dst, src, +off` /// `PC += off if dst < src (signed)`.
+    Opcode_JSLT_REG = (BPF_JMP | BPF_X | BPF_JSLT) as isize,
+    /// BPF opcode: `jsle dst, imm, +off` /// `PC += off if dst <= imm (signed)`.
+    Opcode_JSLE_IMM = (BPF_JMP | BPF_K | BPF_JSLE) as isize,
+    /// BPF opcode: `jsle dst, src, +off` /// `PC += off if dst <= src (signed)`.
+    Opcode_JSLE_REG = (BPF_JMP | BPF_X | BPF_JSLE) as isize,
+    /// BPF opcode: `jeq dst, imm, +off` /// `PC += off if (dst as u32) == imm`.
+    Opcode_JEQ_IMM32 = (BPF_JMP32 | BPF_K | BPF_JEQ) as isize,
+    /// BPF opcode: `jeq dst, src, +off` /// `PC += off if (dst as u32) == (src as u32)`.
+    Opcode_JEQ_REG32 = (BPF_JMP32 | BPF_X | BPF_JEQ) as isize,
+    /// BPF opcode: `jgt dst, imm, +off` /// `PC += off if (dst as u32) > imm`.
+    Opcode_JGT_IMM32 = (BPF_JMP32 | BPF_K | BPF_JGT) as isize,
+    /// BPF opcode: `jgt dst, src, +off` /// `PC += off if (dst as u32) > (src as u32)`.
+    Opcode_JGT_REG32 = (BPF_JMP32 | BPF_X | BPF_JGT) as isize,
+    /// BPF opcode: `jge dst, imm, +off` /// `PC += off if (dst as u32) >= imm`.
+    Opcode_JGE_IMM32 = (BPF_JMP32 | BPF_K | BPF_JGE) as isize,
+    /// BPF opcode: `jge dst, src, +off` /// `PC += off if (dst as u32) >= (src as u32)`.
+    Opcode_JGE_REG32 = (BPF_JMP32 | BPF_X | BPF_JGE) as isize,
+    /// BPF opcode: `jlt dst, imm, +off` /// `PC += off if (dst as u32) < imm`.
+    Opcode_JLT_IMM32 = (BPF_JMP32 | BPF_K | BPF_JLT) as isize,
+    /// BPF opcode: `jlt dst, src, +off` /// `PC += off if (dst as u32) < (src as u32)`.
+    Opcode_JLT_REG32 = (BPF_JMP32 | BPF_X | BPF_JLT) as isize,
+    /// BPF opcode: `jle dst, imm, +off` /// `PC += off if (dst as u32) <= imm`.
+    Opcode_JLE_IMM32 = (BPF_JMP32 | BPF_K | BPF_JLE) as isize,
+    /// BPF opcode: `jle dst, src, +off` /// `PC += off if (dst as u32) <= (src as u32)`.
+    Opcode_JLE_REG32 = (BPF_JMP32 | BPF_X | BPF_JLE) as isize,
+    /// BPF opcode: `jset dst, imm, +off` /// `PC += off if (dst as u32) & imm`.
+    Opcode_JSET_IMM32 = (BPF_JMP32 | BPF_K | BPF_JSET) as isize,
+    /// BPF opcode: `jset dst, src, +off` /// `PC += off if (dst as u32) & (src as u32)`.
+    Opcode_JSET_REG32 = (BPF_JMP32 | BPF_X | BPF_JSET) as isize,
+    /// BPF opcode: `jne dst, imm, +off` /// `PC += off if (dst as u32) != imm`.
+    Opcode_JNE_IMM32 = (BPF_JMP32 | BPF_K | BPF_JNE) as isize,
+    /// BPF opcode: `jne dst, src, +off` /// `PC += off if (dst as u32) != (src as u32)`.
+    Opcode_JNE_REG32 = (BPF_JMP32 | BPF_X | BPF_JNE) as isize,
+    /// BPF opcode: `jsgt dst, imm, +off` /// `PC += off if (dst as i32) > imm (signed)`.
+    Opcode_JSGT_IMM32 = (BPF_JMP32 | BPF_K | BPF_JSGT) as isize,
+    /// BPF opcode: `jsgt dst, src, +off` /// `PC += off if (dst as i32) > (src as i32) (signed)`.
+    Opcode_JSGT_REG32 = (BPF_JMP32 | BPF_X | BPF_JSGT) as isize,
+    /// BPF opcode: `jsge dst, imm, +off` /// `PC += off if (dst as i32) >= imm (signed)`.
+    Opcode_JSGE_IMM32 = (BPF_JMP32 | BPF_K | BPF_JSGE) as isize,
+    /// BPF opcode: `jsge dst, src, +off` /// `PC += off if (dst as i32) >= (src as i32) (signed)`.
+    Opcode_JSGE_REG32 = (BPF_JMP32 | BPF_X | BPF_JSGE) as isize,
+    /// BPF opcode: `jslt dst, imm, +off` /// `PC += off if (dst as i32) < imm (signed)`.
+    Opcode_JSLT_IMM32 = (BPF_JMP32 | BPF_K | BPF_JSLT) as isize,
+    /// BPF opcode: `jslt dst, src, +off` /// `PC += off if (dst as i32) < (src as i32) (signed)`.
+    Opcode_JSLT_REG32 = (BPF_JMP32 | BPF_X | BPF_JSLT) as isize,
+    /// BPF opcode: `jsle dst, imm, +off` /// `PC += off if (dst as i32) <= imm (signed)`.
+    Opcode_JSLE_IMM32 = (BPF_JMP32 | BPF_K | BPF_JSLE) as isize,
+    /// BPF opcode: `jsle dst, src, +off` /// `PC += off if (dst as i32) <= (src as i32) (signed)`.
+    Opcode_JSLE_REG32 = (BPF_JMP32 | BPF_X | BPF_JSLE) as isize,
+    /// BPF opcode: `call imm` /// helper function call to helper with key `imm`.
+    Opcode_CALL = (BPF_JMP | BPF_CALL) as isize,
+    /// BPF opcode: tail call.
+    Opcode_TAIL_CALL = (BPF_JMP | BPF_X | BPF_CALL) as isize,
+    /// BPF opcode: `exit` /// `return r0`.
+    Opcode_EXIT = (BPF_JMP | BPF_EXIT) as isize,
+}
+
 // Used in JIT
 /// Mask to extract the operation class from an operation code.
 pub const BPF_CLS_MASK: u8 = 0x07;
@@ -457,31 +715,66 @@ pub struct Insn {
     pub imm: i32,
 }
 
+// We make the Insn expose the same interface as the insn fast to see if there
+// is any difference between them
+impl InsnLike for Insn {
+    #[inline]
+    fn opc(&self) -> u8 {
+        self.opc
+    }
+    #[inline]
+    fn dst(&self) -> u8 {
+        self.dst
+    }
+    #[inline]
+    fn src(&self) -> u8 {
+        self.src
+    }
+    #[inline]
+    fn off(&self) -> i16 {
+        self.off
+    }
+
+    #[inline]
+    fn imm(&self) -> i32 {
+        self.imm
+    }
+}
+
+
 #[repr(C, packed)]
 pub struct InsnFast<'a> {
     prog_ref: &'a [u8],
 }
 
-impl<'a> InsnFast<'a> {
+pub trait InsnLike {
+    fn opc(&self) -> u8;
+    fn dst(&self) -> u8;
+    fn src(&self) -> u8;
+    fn off(&self) -> i16;
+    fn imm(&self) -> i32;
+}
+
+
+impl InsnLike for InsnFast<'_> {
     #[inline]
-    pub fn opc(&self) -> u8 {
+    fn opc(&self) -> u8 {
         self.prog_ref[0]
     }
     #[inline]
-    pub fn dst(&self) -> u8 {
+    fn dst(&self) -> u8 {
         self.prog_ref[1] & 0x0f
     }
     #[inline]
-    pub fn src(&self) -> u8 {
+    fn src(&self) -> u8 {
         (self.prog_ref[1] & 0xf0) >> 4
     }
     #[inline]
-    pub fn off(&self) -> i16 {
+    fn off(&self) -> i16 {
         LittleEndian::read_i16(&self.prog_ref[2..])
     }
-
     #[inline]
-    pub fn imm(&self) -> i32 {
+    fn imm(&self) -> i32 {
         LittleEndian::read_i32(&self.prog_ref[4..])
     }
 }
@@ -598,17 +891,18 @@ impl Insn {
 ///     ];
 /// let insn = ebpf::get_insn(prog, 1);
 /// ```
+#[inline]
 pub fn get_insn(prog: &[u8], idx: usize) -> Insn {
     // This guard should not be needed in most cases, since the verifier already checks the program
     // size, and indexes should be fine in the interpreter/JIT. But this function is publicly
     // available and user can call it with any `idx`, so we have to check anyway.
-    if (idx + 1) * INSN_SIZE > prog.len() {
-        panic!(
-            "Error: cannot reach instruction at index {:?} in program containing {:?} bytes",
-            idx,
-            prog.len()
-        );
-    }
+    //if (idx + 1) * INSN_SIZE > prog.len() {
+    //    panic!(
+    //        "Error: cannot reach instruction at index {:?} in program containing {:?} bytes",
+    //        idx,
+    //        prog.len()
+    //    );
+    //}
     Insn {
         opc: prog[INSN_SIZE * idx],
         dst: prog[INSN_SIZE * idx + 1] & 0x0f,
@@ -618,15 +912,11 @@ pub fn get_insn(prog: &[u8], idx: usize) -> Insn {
     }
 }
 
+#[inline(always)]
 pub fn get_insn_fast(prog: &[u8], idx: usize) -> InsnFast {
-    if (idx + 1) * INSN_SIZE > prog.len() {
-        panic!(
-            "Error: cannot reach instruction at index {:?} in program containing {:?} bytes",
-            idx,
-            prog.len()
-        );
+    InsnFast {
+        prog_ref: &prog[idx..],
     }
-    InsnFast { prog_ref: &prog[INSN_SIZE * idx..] }
 }
 
 /// Return a vector of `struct Insn` built from a program.

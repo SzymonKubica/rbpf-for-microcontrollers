@@ -1,4 +1,4 @@
-use crate::ebpf::{self, Insn};
+use crate::ebpf::{self, Insn, InsnLike};
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use stdlib::{Error, ErrorKind};
@@ -58,24 +58,25 @@ impl CallInstructionHandler for RawElfFileBinary<'_> {
         &self,
         program: &[u8],
         insn_ptr: &mut usize,
-        insn: Insn,
+        insn: &dyn InsnLike,
         reg: &mut [u64],
         helpers: &BTreeMap<u32, ebpf::Helper>,
         return_address_stack: &mut Vec<usize>,
+        insn_ptr_step_size: usize,
     ) -> Result<(), Error> {
         // The source register determines if we have a helper call or a PC-relative call.
-        match insn.src {
+        match insn.src() {
             0 => {
                 // Do not delegate the check to the verifier, since registered functions can be
                 // changed after the program has been verified.
-                if let Some(function) = helpers.get(&(insn.imm as u32)) {
+                if let Some(function) = helpers.get(&(insn.imm() as u32)) {
                     reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
                 } else {
                     Err(Error::new(
                         ErrorKind::Other,
                         format!(
                             "Error: unknown helper function (id: {:#x})",
-                            insn.imm as u32
+                            insn.imm() as u32
                         ),
                     ))?;
                 }
@@ -84,7 +85,7 @@ impl CallInstructionHandler for RawElfFileBinary<'_> {
                 // Here the source register 1 indicates that we are making
                 // a call relative to the current instruction pointer
                 return_address_stack.push(*insn_ptr);
-                *insn_ptr = ((*insn_ptr as i32 + insn.imm) as usize) as usize;
+                *insn_ptr = ((*insn_ptr as i32 + insn.imm() + insn_ptr_step_size as i32) as usize) as usize;
             }
             3 => {
                 // This is a hacky implementation of calling functions
@@ -97,7 +98,7 @@ impl CallInstructionHandler for RawElfFileBinary<'_> {
                 // they need manual relocation resolution
 
                 return_address_stack.push(*insn_ptr);
-                let function_address = insn.imm as u32;
+                let function_address = insn.imm() as u32;
                 let program_address = program.as_ptr() as u32;
                 let function_offset = function_address - program_address as u32;
                 *insn_ptr = (function_offset / 8) as usize;

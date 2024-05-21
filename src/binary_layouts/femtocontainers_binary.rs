@@ -2,7 +2,7 @@ use log::debug;
 use stdlib::collections::Vec;
 use stdlib::{Error, ErrorKind};
 
-use crate::ebpf::{self, Insn};
+use crate::ebpf::{self, Insn, InsnLike};
 
 use super::common::ElfSection;
 use super::{CallInstructionHandler, SectionAccessor, Binary};
@@ -77,21 +77,22 @@ impl CallInstructionHandler for FemtoContainersBinary {
         &self,
         _program: &[u8],
         insn_ptr: &mut usize,
-        insn: Insn,
+        insn: &dyn InsnLike,
         reg: &mut [u64],
         helpers: &alloc::collections::BTreeMap<u32, ebpf::Helper>,
         return_address_stack: &mut Vec<usize>,
+        insn_ptr_step_size: usize,
     ) -> Result<(), Error> {
-        match insn.src {
+        match insn.src() {
             0 => {
-                if let Some(function) = helpers.get(&(insn.imm as u32)) {
+                if let Some(function) = helpers.get(&(insn.imm() as u32)) {
                     reg[0] = function(reg[1], reg[2], reg[3], reg[4], reg[5]);
                 } else {
                     Err(Error::new(
                         ErrorKind::Other,
                         format!(
                             "Error: unknown helper function (id: {:#x})",
-                            insn.imm as u32
+                            insn.imm() as u32
                         ),
                     ))?;
                 }
@@ -100,14 +101,14 @@ impl CallInstructionHandler for FemtoContainersBinary {
                 // Here the source register 1 indicates that we are making
                 // a call relative to the current instruction pointer
                 return_address_stack.push(*insn_ptr);
-                *insn_ptr = ((*insn_ptr as i32 + insn.imm) as usize) as usize;
+                *insn_ptr = ((*insn_ptr as i32 + insn.imm() * insn_ptr_step_size as i32) as usize) as usize;
             }
             _ => {
                 Err(Error::new(
                     ErrorKind::Other,
                     format!(
                         "Error: invalid CALL src register value: (src: {})",
-                        insn.src as u32
+                        insn.src() as u32
                     ),
                 ))?;
             }
@@ -134,10 +135,10 @@ pub trait LddwdrInstructionHandler {
     fn handle_lddwd_instruction(
         &self,
         _program: &[u8],
-        _insn: Insn,
+        _insn: &dyn InsnLike,
+        _next_insn: &dyn InsnLike,
         _dst: usize,
         _insn_ptr: &mut usize,
-        _text_section: &[u8],
         _reg: &mut [u64],
     ) -> Result<(), Error> {
         return Err(Error::new(
@@ -148,10 +149,10 @@ pub trait LddwdrInstructionHandler {
     fn handle_lddwr_instruction(
         &self,
         _program: &[u8],
-        _insn: Insn,
+        _insn: &dyn InsnLike,
+        _next_insn: &dyn InsnLike,
         _dst: usize,
         _insn_ptr: &mut usize,
-        _text_section: &[u8],
         _reg: &mut [u64],
     ) -> Result<(), Error> {
         return Err(Error::new(
@@ -165,18 +166,17 @@ impl LddwdrInstructionHandler for FemtoContainersBinary {
     fn handle_lddwd_instruction(
         &self,
         program: &[u8],
-        insn: Insn,
+        insn: &dyn InsnLike,
+        next_insn: &dyn InsnLike,
         dst: usize,
         insn_ptr: &mut usize,
-        text_section: &[u8],
         reg: &mut [u64],
     ) -> Result<(), Error> {
-        let next_insn = ebpf::get_insn(text_section, *insn_ptr);
-        *insn_ptr += 1;
+        *insn_ptr += ebpf::INSN_SIZE;
         reg[dst] = program.as_ptr() as u64
             + self.data_section.offset as u64
-            + ((insn.imm as u32) as u64)
-            + ((next_insn.imm as u64) << 32);
+            + ((insn.imm() as u32) as u64)
+            + ((next_insn.imm() as u64) << 32);
 
         Ok(())
     }
@@ -184,18 +184,17 @@ impl LddwdrInstructionHandler for FemtoContainersBinary {
     fn handle_lddwr_instruction(
         &self,
         program: &[u8],
-        insn: Insn,
+        insn: &dyn InsnLike,
+        next_insn: &dyn InsnLike,
         dst: usize,
         insn_ptr: &mut usize,
-        text_section: &[u8],
         reg: &mut [u64],
     ) -> Result<(), Error> {
-        let next_insn = ebpf::get_insn(text_section, *insn_ptr);
-        *insn_ptr += 1;
+        *insn_ptr += ebpf::INSN_SIZE;
         reg[dst] = program.as_ptr() as u64
             + self.rodata_section.offset as u64
-            + ((insn.imm as u32) as u64)
-            + ((next_insn.imm as u64) << 32);
+            + ((insn.imm() as u32) as u64)
+            + ((next_insn.imm() as u64) << 32);
         Ok(())
     }
 }

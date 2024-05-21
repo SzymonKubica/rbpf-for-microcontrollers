@@ -22,10 +22,21 @@ include = [
     "Cargo.toml",
 ]
 
+[profile.release]
+# This is a typical set of options that helps Rust binaries stay small
+lto = true
+codegen-units = 1
+opt-level = 3
+
+
 [dependencies]
+
 
 combine = { version = "4.6", default-features = false}
 time = { version = "0.2", default-features = false }
+num = { version = "0.4.2", default-features = false}
+num-derive = { version = "0.4.2", default-features = false }
+num-traits = { version = "0.2.18", default-features = false }
 byteorder = { version = "1.2", default-features = false }
 goblin = {version = "0.8.0", default_features = false , features = ["elf32", "elf64", "endian_fd"]}
 libm = "0.2.8"
