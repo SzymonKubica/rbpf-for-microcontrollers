@@ -497,7 +497,7 @@ impl ThumbInstruction {
                     return thumb16::Imm8OneRegEncoding::new(BASIC, CPM_OPCODE, *imm as u8, *rd)
                         .emit(mem);
                 } else {
-                    /* // This encoding transforms the immediate operand using the
+                    /* This encoding transforms the immediate operand using the
                      * ThumbExpandImm which is not implemented yet. In short
                      * the way it works is that it uses the top 4 bits of the immediate
                      * to determine how the remaining 8 bits should be shifted
@@ -826,7 +826,11 @@ impl ThumbInstruction {
                 thumb16::HintEncoding::new(0b0, 0b0).emit(mem)
             }
 
-            ThumbInstruction::CompareRegistersShift { rm: _, rd: _, shift: _ } => todo!(),
+            ThumbInstruction::CompareRegistersShift {
+                rm: _,
+                rd: _,
+                shift: _,
+            } => todo!(),
             ThumbInstruction::SignedDivide { rd, rm, rn } => {
                 let opcode = Thumb32OpcodeEncoding::new(0b11, 0b0111001, 0b1);
                 thumb32::ThreeRegsEncoding::new(opcode, *rd, *rn, *rm).emit(mem)
@@ -837,11 +841,13 @@ impl ThumbInstruction {
             }
             ThumbInstruction::Add12BitImmediate { imm12, rn, rd } => {
                 let opcode = Thumb32OpcodeEncoding::new(0b10, 0b100000, 0b0);
-                return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16).emit(mem);
+                return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16)
+                    .emit(mem);
             }
             ThumbInstruction::Subtract12BitImmediate { imm12, rn, rd } => {
                 let opcode = Thumb32OpcodeEncoding::new(0b10, 0b101010, 0b0);
-                return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16).emit(mem);
+                return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16)
+                    .emit(mem);
             }
         }
     }

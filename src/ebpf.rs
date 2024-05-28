@@ -741,7 +741,6 @@ impl InsnLike for Insn {
     }
 }
 
-
 #[repr(C, packed)]
 pub struct InsnFast<'a> {
     prog_ref: &'a [u8],
@@ -754,7 +753,6 @@ pub trait InsnLike {
     fn off(&self) -> i16;
     fn imm(&self) -> i32;
 }
-
 
 impl InsnLike for InsnFast<'_> {
     #[inline]
@@ -912,12 +910,34 @@ pub fn get_insn(prog: &[u8], idx: usize) -> Insn {
     }
 }
 
+#[inline]
+pub fn get_insn_absolute_offset(prog: &[u8], idx: usize) -> Insn {
+    // This guard should not be needed in most cases, since the verifier already checks the program
+    // size, and indexes should be fine in the interpreter/JIT. But this function is publicly
+    // available and user can call it with any `idx`, so we have to check anyway.
+    //if (idx + 1) * INSN_SIZE > prog.len() {
+    //    panic!(
+    //        "Error: cannot reach instruction at index {:?} in program containing {:?} bytes",
+    //        idx,
+    //        prog.len()
+    //    );
+    //}
+    Insn {
+        opc: prog[idx],
+        dst: prog[idx + 1] & 0x0f,
+        src: (prog[idx + 1] & 0xf0) >> 4,
+        off: LittleEndian::read_i16(&prog[(idx + 2)..]),
+        imm: LittleEndian::read_i32(&prog[(idx + 4)..]),
+    }
+}
+
 #[inline(always)]
 pub fn get_insn_fast(prog: &[u8], idx: usize) -> InsnFast {
     InsnFast {
         prog_ref: &prog[idx..],
     }
 }
+
 
 /// Return a vector of `struct Insn` built from a program.
 ///

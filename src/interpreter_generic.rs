@@ -111,12 +111,17 @@ pub fn execute_program<'a>(
     // Loop on instructions
     let mut insn_ptr: usize = 0;
     while insn_ptr < prog.len() {
-        //let insn = ebpf::get_insn(text_section, insn_ptr);
+        //let insn = ebpf::get_insn_absolute_offset(text_section, insn_ptr);
         let insn = ebpf::get_insn_fast(text_section, insn_ptr);
         insn_ptr += ebpf::INSN_SIZE;
         // we need dst register in all cases
         let _dst = insn.dst() as usize;
 
+        debug!(
+            "Executing insn: {:?} at offset {}",
+            insn,
+            insn_ptr - ebpf::INSN_SIZE
+        );
         let opc: Opcode = Opcode::from_u8(insn.opc()).unwrap();
         match opc {
             // BPF_LD class
@@ -230,7 +235,7 @@ pub fn execute_program<'a>(
 
             Opcode::Opcode_LD_DW_IMM => {
                 let next_insn = ebpf::get_insn_fast(text_section, insn_ptr);
-                insn_ptr += 1;
+                insn_ptr += ebpf::INSN_SIZE;
                 reg[_dst] = ((insn.imm() as u32) as u64) + ((next_insn.imm() as u64) << 32);
             }
 
