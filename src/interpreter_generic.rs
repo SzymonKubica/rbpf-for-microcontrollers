@@ -65,8 +65,14 @@ pub fn execute_program<'a>(
 
     let mut allowed_regions = Vec::new();
     // Stack needs to be at the beginning of the allowed memory regions to
-    // make the stack lookups the fastest. (In other cases we need to traverse
-    // the list)
+    // make the stack lookups the fastest. (In the other cases we need to traverse
+    // the list). This is because the stack is likely to be the most frequently
+    // accessed memory location.
+    allowed_regions.push((
+        stack.as_ptr() as usize,
+        stack.as_ptr() as usize + stack.len() as usize,
+        MemoryRegionType::Read as u8 | MemoryRegionType::Write as u8,
+    ));
     allowed_regions.push((
         mem.as_ptr() as usize,
         mem.as_ptr() as usize + mem.len() as usize,
@@ -102,58 +108,49 @@ pub fn execute_program<'a>(
         ));
     }
 
-    // Add a bunch of additional memory regions
-    for i in 1..10 {
-        // The passed-in memory regions specify the length in the second element of
-        // the tuple, not the end of the region
-        allowed_regions.push((
-            i  as usize,
-            (i + 5) as usize,
-            MemoryRegionType::Read as u8,
-        ));
-    }
-
-    allowed_regions.push((
-        stack.as_ptr() as usize,
-        stack.as_ptr() as usize + stack.len() as usize,
-        MemoryRegionType::Read as u8 | MemoryRegionType::Write as u8,
-    ));
-
     // Return address stack for pc-relative function calls. Every time we such
     // call, we push the current pc onto the stack and then pop from it when
     // we encounter an EXIT instruction.
     let mut return_address_stack = vec![];
 
-    let mut cache: RefCell<Vec<Option<usize>>> = RefCell::new(vec![]);
-    for _ in 0..text_section.len() {
-        cache.borrow_mut().push(None)
-    }
-    let mut check_mem_read = |pc, addr, len| {
-        check_mem(addr, len, MemoryRegionType::Read as u8, &allowed_regions)
-        /*
-        check_mem_cache(
-            pc / 8,
-            addr,
-            len,
-            MemoryRegionType::Read as u8,
-            &allowed_regions,
-            &cache,
-        )
-        */
-    };
-    let mut check_mem_write = |pc, addr, len| {
-        check_mem(addr, len, MemoryRegionType::Write as u8, &allowed_regions)
-        /*
-        check_mem_cache(
-            pc / 8,
-            addr,
-            len,
-            MemoryRegionType::Write as u8,
-            &allowed_regions,
-            &cache,
-        )
-        */
-    };
+    let caching_enabled = option_env!("CACHE_MEM_CHECKS").is_some();
+    let mut cache: RefCell<Vec<Option<usize>>> = RefCell::new(vec![None; text_section.len()/8]);
+
+    let mut check_mem_read: Box<dyn Fn(usize, usize, usize) -> Result<(), Error>> =
+        if caching_enabled {
+            Box::new(|pc, addr, len| {
+                check_mem_cache(
+                    pc / 8,
+                    addr,
+                    len,
+                    MemoryRegionType::Read as u8,
+                    &allowed_regions,
+                    &cache,
+                )
+            })
+        } else {
+            Box::new(|pc, addr, len| {
+                check_mem(addr, len, MemoryRegionType::Read as u8, &allowed_regions)
+            })
+        };
+
+    let mut check_mem_write: Box<dyn Fn(usize, usize, usize) -> Result<(), Error>> =
+        if caching_enabled {
+            Box::new(|pc, addr, len| {
+                check_mem_cache(
+                    pc / 8,
+                    addr,
+                    len,
+                    MemoryRegionType::Write as u8,
+                    &allowed_regions,
+                    &cache,
+                )
+            })
+        } else {
+            Box::new(|pc, addr, len| {
+                check_mem(addr, len, MemoryRegionType::Write as u8, &allowed_regions)
+            })
+        };
 
     // Loop on instructions
     let mut insn_ptr: usize = 0;
