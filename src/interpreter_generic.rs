@@ -5,7 +5,7 @@
 // Copyright 2016 6WIND S.A. <quentin.monnet@6wind.com>
 //      (Translation to Rust, MetaBuff/multiple classes addition, hashmaps for helpers)
 // Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
-//      (Adding support for different binary file layouts and pc-relative calls)
+//      (Add support for different binary file layouts and pc-relative calls)
 
 use alloc::boxed::Box;
 use alloc::string::ToString;
@@ -96,9 +96,11 @@ pub fn execute_program<'a>(
     }
 
     for region in &allowed_memory_regions {
+        // The passed-in memory regions specify the length in the second element of
+        // the tuple, not the end of the region
         allowed_regions.push((
             region.0 as usize,
-            region.1 as usize,
+            (region.0 + region.1) as usize,
             MemoryRegionType::Read as u8,
         ));
     }
@@ -107,6 +109,23 @@ pub fn execute_program<'a>(
     // call, we push the current pc onto the stack and then pop from it when
     // we encounter an EXIT instruction.
     let mut return_address_stack = vec![];
+
+    let check_mem_read = |addr, len| {
+        check_mem(
+            addr,
+            len,
+            MemoryRegionType::Read as u8,
+            &allowed_regions,
+        )
+    };
+    let check_mem_write = |addr, len| {
+        check_mem(
+            addr,
+            len,
+            MemoryRegionType::Write as u8,
+            &allowed_regions,
+        )
+    };
 
     // Loop on instructions
     let mut insn_ptr: usize = 0;
@@ -117,11 +136,6 @@ pub fn execute_program<'a>(
         // we need dst register in all cases
         let _dst = insn.dst() as usize;
 
-        debug!(
-            "Executing insn: {:?} at offset {}",
-            insn,
-            insn_ptr - ebpf::INSN_SIZE
-        );
         let opc: Opcode = Opcode::from_u8(insn.opc()).unwrap();
         match opc {
             // BPF_LD class
@@ -131,11 +145,9 @@ pub fn execute_program<'a>(
             Opcode::Opcode_LD_ABS_B => {
                 reg[0] = unsafe {
                     let x = (mem.as_ptr() as usize + (insn.imm() as u32) as usize) as *const u8;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -143,11 +155,9 @@ pub fn execute_program<'a>(
             Opcode::Opcode_LD_ABS_H => {
                 reg[0] = unsafe {
                     let x = (mem.as_ptr() as usize + (insn.imm() as u32) as usize) as *const u16;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -155,11 +165,9 @@ pub fn execute_program<'a>(
             Opcode::Opcode_LD_ABS_W => {
                 reg[0] = unsafe {
                     let x = (mem.as_ptr() as usize + (insn.imm() as u32) as usize) as *const u32;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -167,11 +175,9 @@ pub fn execute_program<'a>(
             Opcode::Opcode_LD_ABS_DW => {
                 reg[0] = unsafe {
                     let x = (mem.as_ptr() as usize + (insn.imm() as u32) as usize) as *const u64;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned()
                 }
@@ -181,11 +187,9 @@ pub fn execute_program<'a>(
                     let x = (mem.as_ptr() as usize
                         + reg[insn.src() as usize] as usize
                         + (insn.imm() as u32) as usize) as *const u8;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -195,11 +199,9 @@ pub fn execute_program<'a>(
                     let x = (mem.as_ptr() as usize
                         + reg[insn.src() as usize] as usize
                         + (insn.imm() as u32) as usize) as *const u16;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -209,11 +211,9 @@ pub fn execute_program<'a>(
                     let x = (mem.as_ptr() as usize
                         + reg[insn.src() as usize] as usize
                         + (insn.imm() as u32) as usize) as *const u32;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -223,11 +223,9 @@ pub fn execute_program<'a>(
                     let x = (mem.as_ptr() as usize
                         + reg[insn.src() as usize] as usize
                         + (insn.imm() as u32) as usize) as *const u64;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned()
                 }
@@ -272,11 +270,9 @@ pub fn execute_program<'a>(
                     #[allow(clippy::cast_ptr_alignment)]
                     let x = (reg[insn.src() as usize] as *const u8).offset(insn.off() as isize)
                         as *const u8;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         1,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -286,11 +282,9 @@ pub fn execute_program<'a>(
                     #[allow(clippy::cast_ptr_alignment)]
                     let x = (reg[insn.src() as usize] as *const u8).offset(insn.off() as isize)
                         as *const u16;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         2,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -300,11 +294,9 @@ pub fn execute_program<'a>(
                     #[allow(clippy::cast_ptr_alignment)]
                     let x = (reg[insn.src() as usize] as *const u8).offset(insn.off() as isize)
                         as *const u32;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         4,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned() as u64
                 }
@@ -314,11 +306,9 @@ pub fn execute_program<'a>(
                     #[allow(clippy::cast_ptr_alignment)]
                     let x = (reg[insn.src() as usize] as *const u8).offset(insn.off() as isize)
                         as *const u64;
-                    check_mem_fast(
+                    check_mem_read(
                         x as usize,
                         8,
-                        MemoryRegionType::Read as u8,
-                        &allowed_regions,
                     )?;
                     x.read_unaligned()
                 }
@@ -327,44 +317,36 @@ pub fn execute_program<'a>(
             // BPF_ST class
             Opcode::Opcode_ST_B_IMM => unsafe {
                 let x = (reg[_dst] as *const u8).offset(insn.off() as isize) as *mut u8;
-                check_mem_fast(
+                check_mem_write(
                     x as usize,
                     1,
-                    MemoryRegionType::Write as u8,
-                    &allowed_regions,
                 )?;
                 x.write_unaligned(insn.imm() as u8)
             },
             Opcode::Opcode_ST_H_IMM => unsafe {
                 #[allow(clippy::cast_ptr_alignment)]
                 let x = (reg[_dst] as *const u8).offset(insn.off() as isize) as *mut u16;
-                check_mem_fast(
+                check_mem_write(
                     x as usize,
                     2,
-                    MemoryRegionType::Write as u8,
-                    &allowed_regions,
                 )?;
                 x.write_unaligned(insn.imm() as u16)
             },
             Opcode::Opcode_ST_W_IMM => unsafe {
                 #[allow(clippy::cast_ptr_alignment)]
                 let x = (reg[_dst] as *const u8).offset(insn.off() as isize) as *mut u32;
-                check_mem_fast(
+                check_mem_write(
                     x as usize,
                     4,
-                    MemoryRegionType::Write as u8,
-                    &allowed_regions,
                 )?;
                 x.write_unaligned(insn.imm() as u32)
             },
             Opcode::Opcode_ST_DW_IMM => unsafe {
                 #[allow(clippy::cast_ptr_alignment)]
                 let x = (reg[_dst] as *const u8).offset(insn.off() as isize) as *mut u64;
-                check_mem_fast(
+                check_mem_write(
                     x as usize,
                     8,
-                    MemoryRegionType::Write as u8,
-                    &allowed_regions,
                 )?;
                 x.write_unaligned(insn.imm() as u64)
             },
@@ -372,44 +354,36 @@ pub fn execute_program<'a>(
             // BPF_STX class
             Opcode::Opcode_ST_B_REG => unsafe {
                 let x = (reg[_dst] as *const u8).offset(insn.off() as isize) as *mut u8;
-                check_mem_fast(
+                check_mem_write(
                     x as usize,
                     1,
-                    MemoryRegionType::Write as u8,
-                    &allowed_regions,
                 )?;
                 x.write_unaligned(reg[insn.src() as usize] as u8)
             },
             Opcode::Opcode_ST_H_REG => unsafe {
                 #[allow(clippy::cast_ptr_alignment)]
                 let x = (reg[_dst] as *const u8).offset(insn.off() as isize) as *mut u16;
-                check_mem_fast(
+                check_mem_write(
                     x as usize,
                     2,
-                    MemoryRegionType::Write as u8,
-                    &allowed_regions,
                 )?;
                 x.write_unaligned(reg[insn.src() as usize] as u16)
             },
             Opcode::Opcode_ST_W_REG => unsafe {
                 #[allow(clippy::cast_ptr_alignment)]
                 let x = (reg[_dst] as *const u8).offset(insn.off() as isize) as *mut u32;
-                check_mem_fast(
+                check_mem_write(
                     x as usize,
                     4,
-                    MemoryRegionType::Write as u8,
-                    &allowed_regions,
                 )?;
                 x.write_unaligned(reg[insn.src() as usize] as u32)
             },
             Opcode::Opcode_ST_DW_REG => unsafe {
                 #[allow(clippy::cast_ptr_alignment)]
                 let x = (reg[_dst] as *const u8).offset(insn.off() as isize) as *mut u64;
-                check_mem_fast(
+                check_mem_write(
                     x as usize,
                     8,
-                    MemoryRegionType::Write as u8,
-                    &allowed_regions,
                 )?;
                 x.write_unaligned(reg[insn.src() as usize])
             },
@@ -807,7 +781,7 @@ pub enum MemoryRegionType {
     Execute = 0b100,
 }
 
-pub fn check_mem_fast(
+pub fn check_mem(
     addr: usize,
     len: usize,
     access_type: u8,
@@ -836,7 +810,7 @@ pub fn check_mem_fast(
 /// This version of the memory check requires a reference to the program slice
 /// so that it can allow read-only access to the program .rodata sections.
 #[inline(always)]
-pub fn check_mem(
+pub fn check_mem_old(
     addr: u64,
     len: usize,
     is_load: bool,
