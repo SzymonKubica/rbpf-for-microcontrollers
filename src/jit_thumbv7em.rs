@@ -703,8 +703,6 @@ impl JitCompiler {
                         // (using u64 value) to gain performance.
 
                         I::MoveRegistersSpecial { rm: R1, rd: R0 }.emit_into(mem)?;
-                        // Clear R1
-                        I::MoveImmediate { rd: R1, imm: 0  }.emit_into(mem)?;
                         // R2 already contains the correct value.
 
                         let mut helper_addr = *helper as u32;
@@ -720,19 +718,51 @@ impl JitCompiler {
                         // before the call and then popping it afterwards
                         let registers = vec![LR];
                         I::PushMultipleRegisters { registers: registers.clone()  }.emit_into(mem)?;
-                        // The remaining 3 arguments go onto the stack. They are
-                        // represented as u64 so we need to shift the stack by 32 bytes downwards
-                        I::SubtractImmediateFromSP { imm: 24 }.emit_into(mem)?;
-                        // The store register SP relative multiplies the immediate by 4
-                        I::StoreRegisterSPRelative { rt: R3, imm8: 0 }.emit_into(mem)?;
-                        // Clears R3 after moving it onto the stack as R3 under
-                        // ARM contains the upper 32 bits of the second argument
-                        I::MoveImmediate { rd: R3, imm: 0  }.emit_into(mem)?;
-                        // Clears the top bits of third argument
-                        I::StoreRegisterSPRelative { rt: R3, imm8: 1 }.emit_into(mem)?;
-                        // We don't support more than 3 args as of now
+
+                        // Given that the first two args are 32-bit but the signature
+                        // of the function expects 64-bit values, we need to
+                        // set registers R1 and R3 to 0 as they correspond to the
+                        // higher bits of the two arguments. The problem is that
+                        // we need to preserve those registers before making the
+                        // call. In case subsequent calls with the same args
+                        // are made
+                        I::PushMultipleRegisters { registers: vec![R1, R3] }.emit_into(mem)?;
+
+
+                        // In our case the arguments are 32-bits long so we need
+                        // to push an empty word before we push each argument.
+                        let empty_register = vec![R1];
+
+                        // Argument 5
+                        I::PushMultipleRegisters { registers: empty_register.clone() }.emit_into(mem)?;
+                        I::PushMultipleRegisters { registers: vec![R5]  }.emit_into(mem)?;
+
+                        // Argument 4
+                        I::PushMultipleRegisters { registers: empty_register.clone() }.emit_into(mem)?;
+                        I::PushMultipleRegisters { registers: vec![R4]  }.emit_into(mem)?;
+
+                        // Argument 3
+                        I::PushMultipleRegisters { registers: empty_register.clone() }.emit_into(mem)?;
+                        I::PushMultipleRegisters { registers: vec![R3]  }.emit_into(mem)?;
+
+                        // Now that R1 and R3 have been preserved we can zero
+                        // them to ensure that arguments are passed correctly as
+                        // 32-bit values.
+                        I::MoveImmediate { rd: R1, imm: 0 }.emit_into(mem)?;
+                        I::MoveImmediate { rd: R3, imm: 0 }.emit_into(mem)?;
+
+                        // Emit the actual jump for the call.
                         I::BranchWithLinkAndExchange { rm: SPILL_REG1 }.emit_into(mem)?;
+
+                        // Erase the stack-located args from the stack.
                         I::AddImmediateToSP { imm: 24 }.emit_into(mem)?;
+
+                        // Restore R1 R3
+                        // Here we note that even though the function might return
+                        // a 64-bit value in registers r0 and r1, we only care about the lower 32 bits,
+                        // as we only support programs operating on 32-bit values.
+                        I::PopMultipleRegisters { registers: vec![R1, R3] }.emit_into(mem)?;
+
                         I::PopMultipleRegisters { registers  }.emit_into(mem)?;
                     } else {
                         Err(Error::new(
