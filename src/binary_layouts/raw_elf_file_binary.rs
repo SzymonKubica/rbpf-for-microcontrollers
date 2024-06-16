@@ -27,7 +27,10 @@ impl<'a> RawElfFileBinary<'a> {
     ) -> Result<&'b [u8], Error> {
         for section in &self.binary.section_headers {
             if let Some(name) = self.binary.shdr_strtab.get_at(section.sh_name) {
-                if name == section_name {
+                // we check for contains instead of equality because of the .rodata.str.1
+                // sections storing read-only data -> this is a quick hack, needs
+                // to be made more general.
+                if name.contains(section_name) {
                     let section_start = section.sh_offset as usize;
                     let section_end = (section.sh_offset + section.sh_size) as usize;
                     return Ok(&program[section_start..section_end]);
@@ -49,7 +52,7 @@ impl<'a> SectionAccessor for RawElfFileBinary<'a> {
         self.extract_section(".data", &program)
     }
     fn get_rodata_section<'b>(&self, program: &'b [u8]) -> Result<&'b [u8], Error> {
-        self.extract_section(".rodata", &program)
+        self.extract_section("rodata", &program)
     }
 }
 

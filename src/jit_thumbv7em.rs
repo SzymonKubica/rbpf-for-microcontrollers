@@ -1105,7 +1105,7 @@ pub fn resolve_data_rodata_relocations(
             }
             CALL_OPCODE => {
                 let mut instr: Call = Call::from(&program[offset..offset + INSTRUCTION_SIZE]);
-                // Both src and dst registers are specified usign one field so we
+                // Both src and dst registers are specified using one field so we
                 // need to set it like this. The src register value 3 tells the
                 // vm to treat the immediate operand of the call as the actual
                 // memory address of the function call.

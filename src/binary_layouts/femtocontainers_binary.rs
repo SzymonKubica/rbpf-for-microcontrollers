@@ -30,9 +30,9 @@ struct FcBytecodeHeader {
 /// containing information about the sections and their lengths present in the
 /// binary, followed by the bytes of the sections without any relocation information.
 pub struct FemtoContainersBinary {
-    text_section: ElfSection,
-    data_section: ElfSection,
-    rodata_section: ElfSection,
+    text_section: (usize, usize),
+    data_section: (usize, usize),
+    rodata_section: (usize, usize),
     prog_len: usize,
 }
 
@@ -49,9 +49,9 @@ impl FemtoContainersBinary {
             let text_offset = rodata_offset + (*header).rodata_len;
 
             let program = FemtoContainersBinary {
-                text_section: ElfSection::new(text_offset, (*header).text_len),
-                data_section: ElfSection::new(data_offset, (*header).data_len),
-                rodata_section: ElfSection::new(rodata_offset, (*header).rodata_len),
+                text_section: (text_offset as usize, (*header).text_len as usize),
+                data_section: (data_offset as usize, (*header).data_len as usize),
+                rodata_section: (rodata_offset as usize, (*header).rodata_len as usize),
                 prog_len: (*header).text_len as usize,
             };
 
@@ -61,14 +61,17 @@ impl FemtoContainersBinary {
 }
 
 impl SectionAccessor for FemtoContainersBinary {
+    #[inline(always)]
     fn get_text_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error> {
-        Ok(self.text_section.extract_section_reference(program))
+        Ok(&program[self.text_section.0..(self.text_section.0+self.text_section.1)])
     }
+    #[inline(always)]
     fn get_data_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error> {
-        Ok(self.data_section.extract_section_reference(program))
+        Ok(&program[self.data_section.0..(self.data_section.0+self.data_section.1)])
     }
+    #[inline(always)]
     fn get_rodata_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error> {
-        Ok(self.rodata_section.extract_section_reference(program))
+        Ok(&program[self.rodata_section.0..(self.rodata_section.0+self.rodata_section.1)])
     }
 }
 
@@ -175,7 +178,7 @@ impl LddwdrInstructionHandler for FemtoContainersBinary {
     ) -> Result<(), Error> {
         *insn_ptr += ebpf::INSN_SIZE;
         reg[dst] = program.as_ptr() as u64
-            + self.data_section.offset as u64
+            + self.data_section.0 as u64
             + ((insn.imm() as u32) as u64)
             + ((next_insn.imm() as u64) << 32);
 
@@ -194,7 +197,7 @@ impl LddwdrInstructionHandler for FemtoContainersBinary {
     ) -> Result<(), Error> {
         *insn_ptr += ebpf::INSN_SIZE;
         reg[dst] = program.as_ptr() as u64
-            + self.rodata_section.offset as u64
+            + self.rodata_section.0 as u64
             + ((insn.imm() as u32) as u64)
             + ((next_insn.imm() as u64) << 32);
         Ok(())

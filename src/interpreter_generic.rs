@@ -7,8 +7,6 @@
 // Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
 //      (Add support for different binary file layouts and pc-relative calls)
 
-use core::cell::RefCell;
-
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use log::debug;
@@ -68,37 +66,39 @@ pub fn execute_program<'a>(
     // make the stack lookups the fastest. (In the other cases we need to traverse
     // the list). This is because the stack is likely to be the most frequently
     // accessed memory location.
+    debug!("Allowed memory regions: \n");
     allowed_regions.push((
         stack.as_ptr() as usize,
         stack.as_ptr() as usize + stack.len() as usize,
         MemoryRegionType::Read as u8 | MemoryRegionType::Write as u8,
     ));
+    debug!(
+        "Stack: {:#x} - {:#x}",
+        stack.as_ptr() as usize,
+        stack.as_ptr() as usize + stack.len()
+    );
     allowed_regions.push((
         mem.as_ptr() as usize,
         mem.as_ptr() as usize + mem.len() as usize,
         MemoryRegionType::Read as u8 | MemoryRegionType::Write as u8,
     ));
+    debug!(
+        "Mem: {:#x} - {:#x}",
+        mem.as_ptr() as usize,
+        mem.as_ptr() as usize + mem.len()
+    );
     allowed_regions.push((
         mbuff.as_ptr() as usize,
         mbuff.as_ptr() as usize + mbuff.len() as usize,
         MemoryRegionType::Read as u8 | MemoryRegionType::Write as u8,
     ));
-    if let Some(section) = data_section {
-        allowed_regions.push((
-            section.as_ptr() as usize,
-            section.as_ptr() as usize + section.len() as usize,
-            MemoryRegionType::Read as u8 | MemoryRegionType::Write as u8,
-        ));
-    }
-    if let Some(section) = rodata_section {
-        allowed_regions.push((
-            section.as_ptr() as usize,
-            section.as_ptr() as usize + section.len() as usize,
-            MemoryRegionType::Read as u8,
-        ));
-    }
+    debug!(
+        "MBuff: {:#x} - {:#x}",
+        mbuff.as_ptr() as usize,
+        mbuff.as_ptr() as usize + mem.len()
+    );
 
-    for region in &allowed_memory_regions {
+    for (i, region) in allowed_memory_regions.iter().enumerate() {
         // The passed-in memory regions specify the length in the second element of
         // the tuple, not the end of the region
         allowed_regions.push((
@@ -106,6 +106,37 @@ pub fn execute_program<'a>(
             (region.0 + region.1) as usize,
             MemoryRegionType::Read as u8,
         ));
+        debug!(
+            "Extra region #{}: {:#x} - {:#x}",
+            i,
+            region.0 as usize,
+            (region.0 + region.1) as usize
+        );
+    }
+
+    if let Some(section) = rodata_section {
+        allowed_regions.push((
+            section.as_ptr() as usize,
+            section.as_ptr() as usize + section.len() as usize,
+            MemoryRegionType::Read as u8,
+        ));
+        debug!(
+            ".rodata: {:#x} - {:#x}",
+            section.as_ptr() as usize,
+            section.as_ptr() as usize + section.len()
+        );
+    }
+    if let Some(section) = data_section {
+        allowed_regions.push((
+            section.as_ptr() as usize,
+            section.as_ptr() as usize + section.len() as usize,
+            MemoryRegionType::Read as u8 | MemoryRegionType::Write as u8,
+        ));
+        debug!(
+            ".data: {:#x} - {:#x}",
+            section.as_ptr() as usize,
+            section.as_ptr() as usize + section.len()
+        );
     }
 
     // Return address stack for pc-relative function calls. Every time we such
@@ -114,18 +145,27 @@ pub fn execute_program<'a>(
     let mut return_address_stack = vec![];
 
     let caching_enabled = option_env!("CACHE_MEM_CHECKS").is_some();
-    let mut cache: RefCell<Vec<Option<usize>>> = RefCell::new(vec![None; text_section.len()/8]);
+    let mut read_access_cache: Vec<Option<usize>> = if caching_enabled {
+        vec![None; text_section.len()]
+    } else {
+        vec![]
+    };
+    let mut write_access_cache: Vec<Option<usize>> = if caching_enabled {
+        vec![None; text_section.len()]
+    } else {
+        vec![]
+    };
 
-    let mut check_mem_read: Box<dyn Fn(usize, usize, usize) -> Result<(), Error>> =
+    let mut check_mem_read: Box<dyn FnMut(usize, usize, usize) -> Result<(), Error>> =
         if caching_enabled {
             Box::new(|pc, addr, len| {
                 check_mem_cache(
-                    pc / 8,
+                    pc,
                     addr,
                     len,
                     MemoryRegionType::Read as u8,
                     &allowed_regions,
-                    &cache,
+                    &mut read_access_cache,
                 )
             })
         } else {
@@ -134,16 +174,16 @@ pub fn execute_program<'a>(
             })
         };
 
-    let mut check_mem_write: Box<dyn Fn(usize, usize, usize) -> Result<(), Error>> =
+    let mut check_mem_write: Box<dyn FnMut(usize, usize, usize) -> Result<(), Error>> =
         if caching_enabled {
             Box::new(|pc, addr, len| {
                 check_mem_cache(
-                    pc / 8,
+                    pc,
                     addr,
                     len,
                     MemoryRegionType::Write as u8,
                     &allowed_regions,
-                    &cache,
+                    &mut write_access_cache,
                 )
             })
         } else {
@@ -746,74 +786,49 @@ pub enum MemoryRegionType {
     Execute = 0b100,
 }
 
+impl MemoryRegionType {
+    fn to_str_from_u8(variant: u8) -> &'static str {
+        match variant {
+            0b001 => "READ",
+            0b010 => "WRITE",
+            0b100 => "EXECUTE",
+            _ => "Invalid memory access type",
+        }
+    }
+}
+
+#[inline(always)]
 pub fn check_mem_cache(
     pc: usize,
     addr: usize,
     len: usize,
     access_type: u8,
     allowed_memory_regions: &Vec<(usize, usize, u8)>,
-    cache: &RefCell<Vec<Option<usize>>>,
-) -> Result<(), Error> {
-    let mut maybe_index = None;
-    {
-        maybe_index = cache.borrow()[pc];
-    }
-    return match maybe_index {
-        Some(index) => {
-            match check_mem_region(addr, len, access_type, allowed_memory_regions[index]) {
-                Ok(()) => Ok(()),
-                Err(_) => {
-                    check_mem_all_regions(pc, addr, len, access_type, allowed_memory_regions, cache)
-                }
-            }
-        }
-        None => check_mem_all_regions(pc, addr, len, access_type, allowed_memory_regions, cache),
-    };
-}
-
-#[inline(always)]
-pub fn check_mem_all_regions(
-    pc: usize,
-    addr: usize,
-    len: usize,
-    access_type: u8,
-    allowed_memory_regions: &Vec<(usize, usize, u8)>,
-    cache: &RefCell<Vec<Option<usize>>>,
+    cache: &mut Vec<Option<usize>>,
 ) -> Result<(), Error> {
     let end = addr + len;
-    for (i, region) in allowed_memory_regions.iter().enumerate() {
-        if region.0 <= addr && end <= region.1 && (access_type & region.2) != 0 {
-            cache.borrow_mut()[pc] = Some(i);
+    if let Some(index) = cache[pc] {
+        if allowed_memory_regions[index].0 <= addr
+            && end <= allowed_memory_regions[index].1
+            && (access_type & allowed_memory_regions[index].2) != 0
+        {
             return Ok(());
         }
     }
-    Err(Error::new(
-        ErrorKind::Other,
-        format!(
-            "Error: memory access violation at address {:#x}",
-            addr as u64
-        ),
-    ))
-}
-
-#[inline(always)]
-pub fn check_mem_region(
-    addr: usize,
-    len: usize,
-    access_type: u8,
-    region: (usize, usize, u8),
-) -> Result<(), Error> {
-    let end = addr + len;
-    if region.0 <= addr && end <= region.1 && (access_type & region.2) != 0 {
-        return Ok(());
+    for (i, region) in allowed_memory_regions.iter().enumerate() {
+        if region.0 <= addr && end <= region.1 && (access_type & region.2) != 0 {
+            cache[pc] = Some(i);
+            return Ok(());
+        }
     }
-    Err(Error::new(
+    return Err(Error::new(
         ErrorKind::Other,
         format!(
-            "Error: memory access violation at address {:#x}",
+            "Error: memory {} access violation at address {:#x}",
+            MemoryRegionType::to_str_from_u8(access_type),
             addr as u64
         ),
-    ))
+    ));
 }
 
 #[inline(always)]
