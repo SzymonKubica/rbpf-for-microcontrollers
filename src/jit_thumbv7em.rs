@@ -219,7 +219,8 @@ impl JitCompiler {
         // R3: mem_len
 
         // Save mem pointer for use with LD_ABS_* and LD_IND_* instructions
-        I::MoveRegistersSpecial { rm: R2, rd: R10 }.emit_into(mem)?;
+        // Not needed yet.
+        // I::MoveRegistersSpecial { rm: R2, rd: R10 }.emit_into(mem)?;
 
         // We need to adjust pointers to the packet buffer and mem according
         // to the eBPF specification
@@ -298,8 +299,7 @@ impl JitCompiler {
                 // BPF_LDX class
                 ebpf::LD_B_REG => I::LoadRegisterByteImmediate { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?,
                 ebpf::LD_H_REG => I::LoadRegisterHalfwordImmediate { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?,
-                ebpf::LD_W_REG =>  I::LoadRegisterImmediate  { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?,
-                ebpf::LD_DW_REG => error_32_bit_arch()?,
+                ebpf::LD_W_REG | ebpf::LD_DW_REG =>  I::LoadRegisterImmediate  { imm: insn.off, rn: src, rt: dst }.emit_into(mem)?,
                 // BPF_ST class
                 ebpf::ST_B_IMM => {
                     // The ARM ISA does not support storing immediates into memory
@@ -706,11 +706,6 @@ impl JitCompiler {
                         // Clear R1
                         I::MoveImmediate { rd: R1, imm: 0  }.emit_into(mem)?;
                         // R2 already contains the correct value.
-                        // We should move R3-R5 to the stack before clearing R3,
-                        // however we don't do that yet as we don't need to
-                        // support helpers with more than 2 arguments right now.
-                        // Clear R3
-                        I::MoveImmediate { rd: R3, imm: 0  }.emit_into(mem)?;
 
                         let mut helper_addr = *helper as u32;
                         // We set the ARM Thumb instruction set selection bit so
@@ -725,7 +720,19 @@ impl JitCompiler {
                         // before the call and then popping it afterwards
                         let registers = vec![LR];
                         I::PushMultipleRegisters { registers: registers.clone()  }.emit_into(mem)?;
+                        // The remaining 3 arguments go onto the stack. They are
+                        // represented as u64 so we need to shift the stack by 32 bytes downwards
+                        I::SubtractImmediateFromSP { imm: 24 }.emit_into(mem)?;
+                        // The store register SP relative multiplies the immediate by 4
+                        I::StoreRegisterSPRelative { rt: R3, imm8: 0 }.emit_into(mem)?;
+                        // Clears R3 after moving it onto the stack as R3 under
+                        // ARM contains the upper 32 bits of the second argument
+                        I::MoveImmediate { rd: R3, imm: 0  }.emit_into(mem)?;
+                        // Clears the top bits of third argument
+                        I::StoreRegisterSPRelative { rt: R3, imm8: 1 }.emit_into(mem)?;
+                        // We don't support more than 3 args as of now
                         I::BranchWithLinkAndExchange { rm: SPILL_REG1 }.emit_into(mem)?;
+                        I::AddImmediateToSP { imm: 24 }.emit_into(mem)?;
                         I::PopMultipleRegisters { registers  }.emit_into(mem)?;
                     } else {
                         Err(Error::new(
@@ -759,9 +766,6 @@ impl JitCompiler {
 
             insn_ptr += 1;
         }
-
-        // Epilogue
-        //self.set_anchor(mem, TARGET_PC_EXIT);
 
         // Move register 0 into R0
         if map_register(0) != R0 {
@@ -854,49 +858,6 @@ impl JitCompiler {
             .emit_into(&mut offset_mem)?;
         }
         Ok(())
-    }
-
-    fn save_callee_save_registers(mem: &mut JitMemory) -> Result<(), Error> {
-        let registers = vec![R4, R5, R6, R7, LR];
-        I::PushMultipleRegisters { registers }.emit_into(mem)?;
-
-        // We also need to manually push R8, R10 and R11 as they cannot be pushed using push
-        // multiple instruction. We do this by first shifting the stack 3 slots downwards and then
-        // storing the registers in the newly freed slots. Each entry on the stack occupies 4B
-        // The problem is that store register immediate can only take in registers
-        // with 3-bit indices, therefore we need to first move R8, R10 and R11 to R4, R5 and R6
-        // We can do this as they have already been saved on the stack.
-        I::MoveRegistersSpecial { rm: R8, rd: R4 }.emit_into(mem)?;
-        I::MoveRegistersSpecial { rm: R10, rd: R5 }.emit_into(mem)?;
-        I::MoveRegistersSpecial { rm: R11, rd: R6 }.emit_into(mem)?;
-
-        I::SubtractImmediateFromSP { imm: 12 }.emit_into(mem)?;
-        let mut imm = 0;
-        let rn = SP;
-        I::StoreRegisterImmediate { imm, rn, rt: R4 }.emit_into(mem)?;
-        imm += 4;
-        I::StoreRegisterImmediate { imm, rn, rt: R5 }.emit_into(mem)?;
-        imm += 4;
-        I::StoreRegisterImmediate { imm, rn, rt: R6 }.emit_into(mem)
-    }
-
-    fn restore_callee_save_registers(mem: &mut JitMemory) -> Result<(), Error> {
-        let mut imm = 0;
-        let rn = SP;
-        I::LoadRegisterImmediate { imm, rn, rt: R4 }.emit_into(mem)?;
-        imm += 4;
-        I::LoadRegisterImmediate { imm, rn, rt: R5 }.emit_into(mem)?;
-        imm += 4;
-        I::LoadRegisterImmediate { imm, rn, rt: R6 }.emit_into(mem)?;
-        I::AddImmediateToSP { imm: 12 }.emit_into(mem)?;
-
-        I::MoveRegistersSpecial { rm: R4, rd: R8 }.emit_into(mem)?;
-        I::MoveRegistersSpecial { rm: R5, rd: R10 }.emit_into(mem)?;
-        I::MoveRegistersSpecial { rm: R6, rd: R11 }.emit_into(mem)?;
-
-        // Restore callee-saved registers
-        let registers = vec![R4, R5, R6, R7, PC];
-        I::PopMultipleRegisters { registers }.emit_into(mem)
     }
 
     /// Verifies that a given immediate value fits into a bitstring of length

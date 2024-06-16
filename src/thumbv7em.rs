@@ -238,6 +238,10 @@ pub enum ThumbInstruction {
         rn: u8,
         rt: u8,
     },
+    StoreRegisterSPRelative {
+        rt: u8,
+        imm8: u8,
+    },
     StoreRegisterHalfword {
         rm: u8,
         rn: u8,
@@ -848,6 +852,9 @@ impl ThumbInstruction {
                 let opcode = Thumb32OpcodeEncoding::new(0b10, 0b101010, 0b0);
                 return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16)
                     .emit(mem);
+            }
+            ThumbInstruction::StoreRegisterSPRelative { rt, imm8 } =>  {
+                thumb16::Imm8OneRegEncoding::new(InstructionClassOpcode::new(0b1001, 4), 0b0, *imm8, *rt).emit(mem)
             }
         }
     }
