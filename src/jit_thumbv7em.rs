@@ -200,12 +200,12 @@ impl JitCompiler {
         debug!("JIT: rodata section address: {:#x}", rodata_addr);
         debug!("JIT: data section address: {:#x}", data_addr);
 
-        resolve_data_rodata_relocations(prog, data_addr, rodata_addr);
+        let _ = resolve_data_rodata_relocations(prog, data_addr, rodata_addr);
 
         let binary: Box<dyn Binary> = Box::new(RawElfFileBinary::new(&prog)?);
         let mut text = binary.get_text_section(&prog)?;
 
-        let callee_saved_regs = vec![R4, R5, R6, R7, R8, R10, R11, LR];
+        let callee_saved_regs = vec![R4, R5, R6, R7, R8, R9, R10, R11, LR];
         I::PushMultipleRegisters {
             registers: callee_saved_regs.clone(),
         }
@@ -245,7 +245,7 @@ impl JitCompiler {
             rm: SP,
             rd: map_register(10),
         }
-        .emit_into(mem);
+        .emit_into(mem)?;
 
         // Allocate stack space
         // Subtract eBPF stack size from stack pointer. Given that our instruction
@@ -528,27 +528,27 @@ impl JitCompiler {
                     // We insert two noops for the branch instruction so that
                     // we can place the actual branch instruction in a way that
                     // ensures that the jumped offset is even.
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JEQ_IMM | ebpf::JEQ_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::EQ, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JEQ_REG | ebpf::JEQ_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::EQ, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JGT_IMM | ebpf::JGT_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::HI, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JGT_REG | ebpf::JGT_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::HI, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JGE_IMM | ebpf::JGE_IMM32 => {
                     // ARM ISA only has LS and HI unsigned comparison condtions,
@@ -565,19 +565,19 @@ impl JitCompiler {
                     // We use GE for now: TODO implement the above if breaks.
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::GE, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JGE_REG | ebpf::JGE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::GE, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JLT_IMM | ebpf::JLT_IMM32 => {
                     // Note: JLT wants to use an unsigned comparison but our LT is signed -> how to
                     // get around this? Can we repurpose the Condition::HI and reordering operands?
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::LT, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JLT_REG | ebpf::JLT_REG32 => {
                     // We need to handle unsigned LT in as special way as ARM ISA
@@ -585,78 +585,78 @@ impl JitCompiler {
                     // is unsigned Lower or Same.
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::LT, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JLE_IMM | ebpf::JLE_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::LS, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JLE_REG | ebpf::JLE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::LS, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
 
                 ebpf::JSET_IMM | ebpf::JSET_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::CS, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSET_REG | ebpf::JSET_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::CS, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JNE_IMM | ebpf::JNE_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::NE, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JNE_REG | ebpf::JNE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::NE, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSGT_IMM | ebpf::JSGT_IMM32 =>{
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::GT, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSGT_REG | ebpf::JSGT_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::GT, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSGE_IMM | ebpf::JSGE_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::GE, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSGE_REG | ebpf::JSGE_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::GE, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSLT_IMM | ebpf::JSLT_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::LT, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSLT_REG | ebpf::JSLT_REG32 => {
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::LT, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSLE_IMM | ebpf::JSLE_IMM32 => {
                     I::CompareImmediate { rd: dst, imm: insn.imm }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::LE, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
                 ebpf::JSLE_REG | ebpf::JSLE_REG32 =>{
                     I::CompareRegisters { rm: src, rd:dst }.emit_into(mem)?;
                     self.record_cond_branch(insn_ptr, insn.off, Condition::LE, mem);
-                    ThumbInstruction::BlankInstruction.emit_into(mem);
+                    ThumbInstruction::BlankInstruction.emit_into(mem)?;
                 }
 
                 ebpf::CALL => {
@@ -726,8 +726,12 @@ impl JitCompiler {
                         // we need to preserve those registers before making the
                         // call. In case subsequent calls with the same args
                         // are made
-                        I::PushMultipleRegisters { registers: vec![R1, R3] }.emit_into(mem)?;
+                        I::PushMultipleRegisters { registers: vec![R2, R3] }.emit_into(mem)?;
 
+                        // Now that R1 has been preserved we can zero
+                        // it to ensure that arguments are passed correctly as
+                        // 32-bit values.
+                        I::MoveImmediate { rd: R1, imm: 0 }.emit_into(mem)?;
 
                         // In our case the arguments are 32-bits long so we need
                         // to push an empty word before we push each argument.
@@ -745,10 +749,9 @@ impl JitCompiler {
                         I::PushMultipleRegisters { registers: empty_register.clone() }.emit_into(mem)?;
                         I::PushMultipleRegisters { registers: vec![R3]  }.emit_into(mem)?;
 
-                        // Now that R1 and R3 have been preserved we can zero
-                        // them to ensure that arguments are passed correctly as
+                        // Now that R3 has been used and preserved we can zero
+                        // it to ensure that arguments are passed correctly as
                         // 32-bit values.
-                        I::MoveImmediate { rd: R1, imm: 0 }.emit_into(mem)?;
                         I::MoveImmediate { rd: R3, imm: 0 }.emit_into(mem)?;
 
                         // Emit the actual jump for the call.
@@ -761,7 +764,7 @@ impl JitCompiler {
                         // Here we note that even though the function might return
                         // a 64-bit value in registers r0 and r1, we only care about the lower 32 bits,
                         // as we only support programs operating on 32-bit values.
-                        I::PopMultipleRegisters { registers: vec![R1, R3] }.emit_into(mem)?;
+                        I::PopMultipleRegisters { registers: vec![R2, R3] }.emit_into(mem)?;
 
                         I::PopMultipleRegisters { registers  }.emit_into(mem)?;
                     } else {

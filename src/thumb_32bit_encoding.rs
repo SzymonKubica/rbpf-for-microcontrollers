@@ -43,6 +43,53 @@ impl Into<u32> for Thumb32OpcodeEncoding {
     }
 }
 
+pub struct Imm5LSLTwoRegsEncoding {
+    opcode: Thumb32OpcodeEncoding,
+    rm: u8,
+    rd: u8,
+    imm5: u8,
+}
+
+impl Imm5LSLTwoRegsEncoding {
+    pub fn new(opcode: Opcode, rm: u8, rd: u8, imm5: u8) -> Imm5LSLTwoRegsEncoding {
+        Imm5LSLTwoRegsEncoding {
+            opcode,
+            rm,
+            rd,
+            imm5,
+        }
+    }
+}
+
+impl Emittable for Imm5LSLTwoRegsEncoding {
+    fn emit(&self, mem: &mut JitMemory) -> Result<(), Error> {
+
+        let mut encoding = 0;
+
+        // We first break up the immediate into its parts
+        let imm3 = (self.imm5 >> 2 & 0b111) as u32;
+        let imm2 = (self.imm5 & 0b11) as u32;
+
+        // Because of the endianness of the machine (we are in Little Endian)
+        // we need to encode the two words in reverse order.
+
+        // We first write the lower word
+        encoding |= imm3 << 12;
+        encoding |= (self.rd as u32 & 0b1111) << 8;
+        encoding |= imm2 << 6;
+        encoding |= self.rm as u32 & 0b1111;
+        encoding <<= 16;
+        // LSL always has the 4 bits of the higher word set.
+        encoding |= 0b1111;
+
+        // Now we get the encoded opcode and stamp it on top of the instruction
+        let opcode_encoding: u32 = self.opcode.into();
+        encoding |= opcode_encoding;
+        emit::<u32>(mem, encoding);
+        Ok(())
+    }
+}
+
 pub struct Imm12TwoRegsEncoding {
     opcode: Thumb32OpcodeEncoding,
     rn: u8,

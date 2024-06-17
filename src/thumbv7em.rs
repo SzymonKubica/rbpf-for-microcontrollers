@@ -391,8 +391,13 @@ impl ThumbInstruction {
         match self {
             // Shift (immediate), add, subtract, move, and compare
             ThumbInstruction::LogicalShiftLeftImmediate { imm5, rm, rd } => {
-                const LSL_OPCODE: u8 = 0b00;
-                thumb16::Imm5TwoRegsEncoding::new(BASIC, LSL_OPCODE, *imm5, *rm, *rd).emit(mem)
+                if *rm > 8 || *rd > 8 {
+                    let opcode = Thumb32OpcodeEncoding::new(0b01, 0b0100100, 0b0);
+                    thumb32::Imm5LSLTwoRegsEncoding::new(opcode, *rm, *rd, *imm5).emit(mem)
+                } else {
+                    const LSL_OPCODE: u8 = 0b00;
+                    thumb16::Imm5TwoRegsEncoding::new(BASIC, LSL_OPCODE, *imm5, *rm, *rd).emit(mem)
+                }
             }
             ThumbInstruction::LogicalShiftRightImmediate { imm5, rm, rd } => {
                 const LSR_OPCODE: u8 = 0b01;
@@ -853,8 +858,14 @@ impl ThumbInstruction {
                 return thumb32::Imm12SplitTwoRegsEncoding::new(opcode, *rn, *rd, *imm12 as u16)
                     .emit(mem);
             }
-            ThumbInstruction::StoreRegisterSPRelative { rt, imm8 } =>  {
-                thumb16::Imm8OneRegEncoding::new(InstructionClassOpcode::new(0b1001, 4), 0b0, *imm8, *rt).emit(mem)
+            ThumbInstruction::StoreRegisterSPRelative { rt, imm8 } => {
+                thumb16::Imm8OneRegEncoding::new(
+                    InstructionClassOpcode::new(0b1001, 4),
+                    0b0,
+                    *imm8,
+                    *rt,
+                )
+                .emit(mem)
             }
         }
     }
