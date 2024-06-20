@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+// Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
+//      (ARM thumbv7em architecture 32bit encoding implementation)
+
 use crate::thumb_16bit_encoding::Emittable;
 use crate::{jit_thumbv7em::emit, JitMemory};
 

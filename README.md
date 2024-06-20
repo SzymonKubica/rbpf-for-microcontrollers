@@ -5,7 +5,7 @@
   <img src="misc/rbpf_256.png">
 </picture>
 
-Rust (user-space) virtual machine for eBPF
+Rust (user-space) virtual machine for eBPF (`micro-bpf` fork)
 
 [![Build Status](https://github.com/qmonnet/rbpf/actions/workflows/test.yaml/badge.svg)](https://github.com/qmonnet/rbpf/actions/workflows/test.yaml)
 [![Build status](https://ci.appveyor.com/api/projects/status/ia74coeuhxtrcvsk/branch/main?svg=true)](https://ci.appveyor.com/project/qmonnet/rbpf/branch/main)
@@ -24,6 +24,27 @@ Rust (user-space) virtual machine for eBPF
 * [License](#license)
 * [Inspired by](#inspired-by)
 * [Other resources](#other-resources)
+
+## µBPF fork of rbpf
+
+This version of `rbpf` is a fork created to meet the requirements of [µBPF](https://github.com/SzymonKubica/micro-bpf)
+Comparted to the baseline implementation it adds support for:
+- additional program binary formats (e.g. raw object files produced by LLVM)
+- program-counter-relative function calls (see [here](https://www.ietf.org/archive/id/draft-thaler-bpf-isa-00.html#name-bpf-local-functions))
+- programs containing `.data` and `.rodata` sections don't lose this information,
+  this means that programs can contain strings for printing debug information.
+- when using raw object files, combined with `micro-bpf-tools` this version
+  supports data relocations by patching the `.data` section of the program.
+
+This version of the crate supports `no_std`, albeit in a bit messy way. For a
+clean and fully-compatible implementation of `no_std` support, please refer to
+the upstream repo where a subset of the changes introduced by this fork were
+[merged](https://github.com/qmonnet/rbpf/pull/106).
+
+
+This version also contains an [ARMv7-eM JIT compiler](src/jit_thumbv7em.rs) which
+allows for just-in-time compilation of programs running on microcontrollers with
+Arm Cortex M CPUs.
 
 ## Description
 
