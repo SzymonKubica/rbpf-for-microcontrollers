@@ -27,8 +27,8 @@ Rust (user-space) virtual machine for eBPF (`micro-bpf` fork)
 
 ## µBPF fork of rbpf
 
-This version of `rbpf` is a fork created to meet the requirements of [µBPF](https://github.com/SzymonKubica/micro-bpf)
-Comparted to the baseline implementation it adds support for:
+This version of `rbpf` is a fork created to meet the requirements of [µBPF](https://github.com/SzymonKubica/micro-bpf).
+Compared to the baseline implementation it adds support for:
 - additional program binary formats (e.g. raw object files produced by LLVM)
 - program-counter-relative function calls (see [here](https://www.ietf.org/archive/id/draft-thaler-bpf-isa-00.html#name-bpf-local-functions))
 - programs containing `.data` and `.rodata` sections don't lose this information,
