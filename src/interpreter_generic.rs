@@ -841,7 +841,7 @@ pub fn check_mem(
 ) -> Result<(), Error> {
     let end = addr + len;
     for region in allowed_memory_regions {
-        if region.0 <= addr && end <= region.1 && (access_type & region.2) != 0 {
+        if addr <= end && region.0 <= addr && end <= region.1 && (access_type & region.2) != 0 {
             return Ok(());
         }
     }
