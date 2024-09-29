@@ -17,7 +17,6 @@
 //! respect this convention.
 
 use libm::{floor, log};
-use stdlib::u64;
 #[cfg(feature = "std")]
 extern crate libc;
 

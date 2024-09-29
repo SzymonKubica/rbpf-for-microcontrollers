@@ -6,8 +6,7 @@ use crate::thumb_16bit_encoding::{
 use crate::thumb_32bit_encoding::{self as thumb32, Thumb32OpcodeEncoding};
 use crate::{jit_thumbv7em::emit, JitMemory};
 use log::debug;
-use stdlib::collections::Vec;
-use stdlib::{Error, ErrorKind};
+use crate::lib::*;
 
 // Registers
 pub const R0: u8 = 0;

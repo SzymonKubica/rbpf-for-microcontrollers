@@ -1,12 +1,12 @@
 use log::debug;
 
-use crate::ebpf::{self, Insn, InsnLike};
+use crate::ebpf::{self, InsnLike};
+use crate::lib::*;
 
 use super::{
     common::ElfSection, Binary, CallInstructionHandler, LddwdrInstructionHandler, SectionAccessor,
 };
 use alloc::vec::Vec;
-use stdlib::{Error, ErrorKind};
 
 /// Extended version of the metadata header used by Femto-Containers. This one
 /// contains information regarding the relocated calls (for supporting non-inlined,

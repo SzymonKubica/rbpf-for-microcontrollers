@@ -19,6 +19,7 @@
 // Contrary to the verifier of the Linux kernel, this one does not modify the bytecode at all.
 
 use ebpf;
+use log::debug;
 use crate::InterpreterVariant;
 use crate::lib::*;
 

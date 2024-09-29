@@ -1,10 +1,8 @@
 use log::debug;
-use stdlib::collections::Vec;
-use stdlib::{Error, ErrorKind};
+use crate::lib::*;
 
-use crate::ebpf::{self, Insn, InsnLike};
+use crate::ebpf::{self, InsnLike};
 
-use super::common::ElfSection;
 use super::{CallInstructionHandler, SectionAccessor, Binary};
 
 /// Header present at the start of the Femto-Containers binary.

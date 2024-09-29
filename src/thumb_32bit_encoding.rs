@@ -5,8 +5,7 @@
 use crate::thumb_16bit_encoding::Emittable;
 use crate::{jit_thumbv7em::emit, JitMemory};
 
-use stdlib::collections::Vec;
-use stdlib::{Error};
+use crate::lib::*;
 
 /// Defines how to encode the opcode of 32-bit Thumb instructions.
 /// Instruction is laid out as follows:

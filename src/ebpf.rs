@@ -17,9 +17,7 @@
 use core::fmt::{self, Debug, Formatter};
 
 use byteorder::{ByteOrder, LittleEndian};
-use log::debug;
 use num_derive::FromPrimitive;
-use stdlib::collections::Vec;
 use crate::lib::*;
 
 /// Maximum number of instructions in an eBPF program.

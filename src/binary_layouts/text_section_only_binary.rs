@@ -1,7 +1,6 @@
-use stdlib::collections::Vec;
-use stdlib::{Error, ErrorKind};
 
-use crate::ebpf::{self, Insn, InsnLike};
+use crate::lib::*;
+use crate::ebpf::{self, InsnLike};
 
 use super::{Binary, CallInstructionHandler, SectionAccessor, LddwdrInstructionHandler};
 

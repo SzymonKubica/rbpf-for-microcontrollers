@@ -2,11 +2,11 @@
 // Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
 //      (ARM thumbv7em architecture 16bit encoding implementation)
 
-use crate::thumbv7em::{Condition};
+use crate::thumbv7em::Condition;
 use crate::{jit_thumbv7em::emit, JitMemory};
 use log::debug;
 
-use stdlib::{Error};
+use crate::lib::*;
 
 pub const INSTRUCTION_SIZE: u16 = 16;
 

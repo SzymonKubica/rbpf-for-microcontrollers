@@ -13,7 +13,7 @@ pub struct Error {
     #[allow(dead_code)]
     kind: ErrorKind,
     #[allow(dead_code)]
-    error: String,
+    pub error: String,
 }
 
 impl Error {

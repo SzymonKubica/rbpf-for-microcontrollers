@@ -41,7 +41,6 @@ extern crate num;
 extern crate num_derive;
 extern crate libm;
 extern crate log;
-extern crate log;
 #[cfg(feature = "std")]
 extern crate time;
 
@@ -58,32 +57,25 @@ extern crate cranelift_jit;
 extern crate cranelift_module;
 #[cfg(feature = "cranelift")]
 extern crate cranelift_native;
-// Conditional importing based on std/no_std described here:
-// https://gist.github.com/tdelabro/b2d1f2a0f94ceba72b718b92f9a7ad7b
-#[cfg(feature = "std")]
-include!("./with_std.rs");
-#[cfg(not(feature = "std"))]
-include!("./without_std.rs");
-#[cfg(not(feature = "std"))]
-include!("./with_alloc.rs");
 
-
-use alloc::boxed::Box;
-use binary_layouts::{ExtendedHeaderBinary, FemtoContainersBinary, RawElfFileBinary};
-use byteorder::{ByteOrder, LittleEndian};
-pub use jit_thumbv7em::{JitCompiler, JitMemory};
-use stdlib::collections::BTreeMap;
-use stdlib::collections::{vec, Vec};
-use stdlib::u32;
-use stdlib::{Error, ErrorKind};
 use crate::lib::*;
 use byteorder::{ByteOrder, LittleEndian};
+use alloc::boxed::Box;
 
-#[cfg(std)]
-mod asm_parser;
-#[cfg(std)]
-pub mod assembler;
+/* Imports that were added that are specific to micro-bpf */
 mod binary_layouts;
+mod interpreter_generic;
+mod jit_thumbv7em;
+mod thumb_16bit_encoding;
+mod thumb_32bit_encoding;
+mod thumbv7em;
+use binary_layouts::{ExtendedHeaderBinary, FemtoContainersBinary, RawElfFileBinary};
+pub use jit_thumbv7em::{JitCompiler, JitMemory};
+pub use verifier::check_helpers;
+/* End micro-bpf-specific imports */
+
+mod asm_parser;
+pub mod assembler;
 #[cfg(feature = "cranelift")]
 mod cranelift;
 pub mod disassembler;
@@ -91,14 +83,6 @@ pub mod ebpf;
 pub mod helpers;
 pub mod insn_builder;
 mod interpreter;
-<<<<<<< HEAD
-mod interpreter_generic;
-mod jit_thumbv7em;
-mod thumb_16bit_encoding;
-mod thumb_32bit_encoding;
-mod thumbv7em;
-
-pub use verifier::check_helpers;
 #[cfg(all(not(windows), feature = "std"))]
 mod jit;
 #[cfg(not(feature = "std"))]
@@ -190,7 +174,6 @@ pub mod lib {
 
     #[cfg(not(feature = "std"))]
     pub use alloc::format;
->>>>>>> upstream/main
 }
 
 /// eBPF verification function that returns an error if the program does not meet its requirements.
@@ -252,6 +235,7 @@ pub struct EbpfVmMbuff<'a> {
     prog: Option<&'a [u8]>,
     verifier: Verifier,
     /// This is the jit memory that is dedicated to the ARMv7-eM JIT compiler
+    #[cfg(not(feature = "std"))]
     jit: Option<jit_thumbv7em::JitMemory<'a>>,
     #[cfg(all(not(windows), feature = "std"))]
     jit: Option<jit::JitMemory<'a>>,
@@ -289,8 +273,8 @@ impl<'a> EbpfVmMbuff<'a> {
         Ok(EbpfVmMbuff {
             prog,
             verifier: Self::get_verifier(interpreter_variant),
+            #[cfg(not(feature = "std"))]
             jit: None,
-            verifier: verifier::check,
             #[cfg(all(not(windows), feature = "std"))]
             jit: None,
             #[cfg(feature = "cranelift")]
@@ -561,8 +545,9 @@ impl<'a> EbpfVmMbuff<'a> {
                 self.prog,
                 mem,
                 mbuff,
-                &self.helpers,
                 allowed_memory_regions,
+                &self.helpers,
+                &HashSet::new(),
             );
         };
         let binary: Box<dyn binary_layouts::Binary> = match self.interpreter_variant {

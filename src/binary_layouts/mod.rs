@@ -22,10 +22,11 @@
 //!   located in the loaded program buffer.
 //! - handling funtion calls and load/store instruction is layout specific
 
-use crate::ebpf::{self, Insn, InsnLike};
+
+use crate::ebpf::{self, InsnLike};
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use stdlib::Error;
+use crate::lib::*;
 
 mod raw_elf_file_binary;
 pub use self::raw_elf_file_binary::RawElfFileBinary;

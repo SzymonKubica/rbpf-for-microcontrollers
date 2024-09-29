@@ -15,15 +15,13 @@ use core::ops::{Index, IndexMut};
 use goblin::container::{Container, Endian};
 use goblin::elf::{Elf, Reloc};
 use log::{debug, error};
-use stdlib::collections::BTreeMap as HashMap;
-use stdlib::collections::Vec;
-use stdlib::{Error, ErrorKind, String};
 
+use crate::lib::*;
 use ebpf;
 use thumbv7em::*;
 
 use crate::binary_layouts::{
-    Binary, ExtendedHeaderBinary, FemtoContainersBinary, RawElfFileBinary, TextSectionOnlyBinary,
+    Binary, RawElfFileBinary,
 };
 use crate::InterpreterVariant;
 

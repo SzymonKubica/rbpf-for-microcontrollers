@@ -7,17 +7,16 @@
 // Copyright 2024 Szymon Kubica <szymo.kubica@gmail.com>
 //      (Add support for different binary file layouts and pc-relative calls)
 
+
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use log::debug;
-use num::FromPrimitive;
-use stdlib::collections::{BTreeMap, Vec};
-use stdlib::{Error, ErrorKind};
 
 use ebpf;
 
+use crate::lib::*;
 use crate::binary_layouts::Binary;
-use crate::ebpf::{InsnLike, Opcode};
+use crate::ebpf::InsnLike;
 
 #[allow(unknown_lints)]
 #[allow(cyclomatic_complexity)]
@@ -25,7 +24,7 @@ pub fn execute_program<'a>(
     prog: &'a [u8],
     mem: &[u8],
     mbuff: &[u8],
-    helpers: &BTreeMap<u32, ebpf::Helper>,
+    helpers: &HashMap<u32, ebpf::Helper>,
     allowed_memory_regions: Vec<(u64, u64)>,
     binary: Box<dyn Binary + 'a>,
 ) -> Result<u64, Error> {
