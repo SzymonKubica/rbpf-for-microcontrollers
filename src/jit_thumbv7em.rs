@@ -20,9 +20,7 @@ use crate::lib::*;
 use ebpf;
 use thumbv7em::*;
 
-use crate::binary_layouts::{
-    Binary, RawElfFileBinary,
-};
+use crate::binary_layouts::{Binary, RawElfFileBinary};
 use crate::InterpreterVariant;
 
 /// The jit-compiled code can then be called as a function
@@ -1092,6 +1090,7 @@ pub fn resolve_data_rodata_relocations(
         match program[offset] as u32 {
             LDDW_OPCODE => {
                 let mut instr: Lddw = Lddw::from(&program[offset..offset + LDDW_INSTRUCTION_SIZE]);
+                debug!("LDDW instruction found: {:?}", instr);
                 instr.immediate_l += value;
                 program[offset..offset + LDDW_INSTRUCTION_SIZE].copy_from_slice((&instr).into());
             }
@@ -1158,6 +1157,7 @@ pub fn find_relocations(binary: &Elf<'_>, buffer: &[u8]) -> Vec<(usize, Reloc)> 
 /// Load-double-word instruction, needed for bytecode patching for loads from
 /// .data and .rodata sections.
 #[repr(C, packed)]
+#[derive(Debug)]
 pub struct Lddw {
     pub opcode: u8,
     pub registers: u8,
@@ -1170,7 +1170,7 @@ pub struct Lddw {
 }
 impl From<&[u8]> for Lddw {
     fn from(bytes: &[u8]) -> Self {
-        unsafe { core::ptr::read(bytes.as_ptr() as *const _) }
+        unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const _) }
     }
 }
 
