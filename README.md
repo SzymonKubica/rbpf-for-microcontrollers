@@ -17,6 +17,7 @@ Rust (user-space) virtual machine for eBPF (`micro-bpf` fork)
 * [API](#api)
 * [Example uses](#example-uses)
 * [Building eBPF programs](#building-ebpf-programs)
+* [Build Features](#build-features)
 * [Feedback welcome!](#feedback-welcome)
 * [Questions / Answers](#questions--answers)
 * [Caveats](#caveats)
@@ -72,7 +73,7 @@ file:
 
 ```toml
 [dependencies]
-rbpf = "0.2.0"
+rbpf = "0.3.0"
 ```
 
 You can also use the development version from this GitHub repository. This
@@ -230,6 +231,16 @@ useful for programs that should be compatible with the Linux kernel and
 therefore must use specific helper numbers.
 
 ```rust,ignore
+pub fn register_allowed_memory(&mut self,, addr: &[u64]) -> ()
+```
+
+This function adds a list of memory addresses that the eBPF program is allowed
+to load and store. Multiple calls to this function will append the addresses to
+an internal HashSet. At the moment rbpf only validates memory accesses when
+using the interpreter. This function is useful when using kernel helpers which
+return pointers to objects stored in eBPF maps.
+
+```rust,ignore
 // for struct EbpfVmMbuff
 pub fn execute_program(&self,
                  mem: &'a mut [u8],
@@ -327,10 +338,10 @@ fn main() {
     // directly reads from packet data)
     let mut vm = rbpf::EbpfVmRaw::new(Some(prog)).unwrap();
 
-    #[cfg(windows)] {
+    #[cfg(any(windows, not(feature = "std")))] {
         assert_eq!(vm.execute_program(mem).unwrap(), 0x11);
     }
-    #[cfg(not(windows))] {
+    #[cfg(all(not(windows), feature = "std"))] {
         // This time we JIT-compile the program.
         vm.jit_compile().unwrap();
 
@@ -373,10 +384,10 @@ fn main() {
     // This eBPF VM is for program that use a metadata buffer.
     let mut vm = rbpf::EbpfVmMbuff::new(Some(prog)).unwrap();
 
-    #[cfg(windows)] {
+    #[cfg(any(windows, not(feature = "std")))] {
         assert_eq!(vm.execute_program(mem, mbuff).unwrap(), 0x2211);
     }
-    #[cfg(not(windows))] {
+    #[cfg(all(not(windows), feature = "std"))] {
         // Here again we JIT-compile the program.
         vm.jit_compile().unwrap();
 
@@ -398,7 +409,7 @@ to your `Cargo.toml` file.
 
 ```toml
 [dependencies]
-rbpf = "0.2.0"
+rbpf = "0.3.0"
 elf = "0.0.10"
 ```
 
@@ -468,9 +479,12 @@ fn main() {
     let mut vm = rbpf::EbpfVmFixedMbuff::new(Some(prog), 0x40, 0x50).unwrap();
 
     // We register a helper function, that can be called by the program, into
-    // the VM.
-    vm.register_helper(helpers::BPF_TRACE_PRINTK_IDX,
-                       helpers::bpf_trace_printf).unwrap();
+    // the VM. The `bpf_trace_printf` is only available when we have access to
+    // the standard library.
+    #[cfg(feature = "std")] {
+        vm.register_helper(helpers::BPF_TRACE_PRINTK_IDX,
+                           helpers::bpf_trace_printf).unwrap();
+    }
 
     // This kind of VM takes a reference to the packet data, but does not need
     // any reference to the metadata buffer: a fixed buffer is handled
@@ -500,7 +514,9 @@ let prog = assemble("add64 r1, 0x605
                      neg64 r2
                      exit").unwrap();
 
-println!("{:?}", prog);
+#[cfg(feature = "std")] {
+    println!("{:?}", prog);
+}
 ```
 
 The above snippet will produce:
@@ -570,6 +586,30 @@ program.add(Source::Imm, Arch::X64).set_dst(1).set_imm(0x605).push()
 
 Again, please refer to [the source and related tests](src/insn_builder.rs) to
 get more information and examples on how to use it.
+
+## Build features
+
+### `no_std`
+
+The `rbpf` crate has a Cargo feature named "std" that is enabled by default. To
+use `rbpf` in `no_std` environments this feature needs to be disabled. To do
+this, you need to modify your dependency on `rbpf` in Cargo.toml to disable the
+enabled-by-default features.
+
+```toml
+[dependencies]
+rbpf = { version = "0.3.0", default-features = false }
+```
+
+Note that when using this crate in `no_std` environments, the `jit` module
+isn't available. This is because it depends on functions provided by `libc`
+(`libc::posix_memalign()`, `libc::mprotect()`) which aren't available on
+`no_std`.
+
+The `assembler` module is available, albeit with reduced debugging features. It
+depends on the `combine` crate providing parser combinators. Under `no_std`
+this crate only provides simple parsers which generate less descriptive error
+messages.
 
 ## Feedback welcome!
 
@@ -709,8 +749,8 @@ details.
   such as in `mov r0, 0x1337`), by Rich Lane for Big Switch Networks (2015)
 
 * [_Building a simple JIT in
-  Rust_](http://www.jonathanturner.org/2015/12/building-a-simple-jit-in-rust.html),
-  by Jonathan Turner (2015)
+  Rust_](https://www.sophiajt.com/building-a-simple-jit-in-rust),
+  by Sophia Turner (2015)
 
 * [bpfjit](https://github.com/polachok/bpfjit) (also [on
   crates.io](https://crates.io/crates/bpfjit)), a Rust crate exporting the cBPF

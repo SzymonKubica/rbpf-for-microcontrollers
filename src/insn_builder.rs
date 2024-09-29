@@ -4,7 +4,7 @@
 //! Module provides API to create eBPF programs by Rust programming language
 
 use ebpf::*;
-use stdlib::collections::Vec;
+use crate::lib::*;
 
 /// Represents single eBPF instruction
 pub trait Instruction: Sized {

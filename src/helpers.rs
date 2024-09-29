@@ -18,6 +18,10 @@
 
 use libm::{floor, log};
 use stdlib::u64;
+#[cfg(feature = "std")]
+extern crate libc;
+
+use crate::lib::*;
 
 // Helpers associated to kernel helpers
 // See also linux/include/uapi/linux/bpf.h in Linux kernel sources.
@@ -46,8 +50,8 @@ pub const BPF_KTIME_GETNS_IDX: u32 = 5;
 #[allow(dead_code)]
 #[allow(unused_variables)]
 #[allow(deprecated)]
-#[cfg(std)]
-pub fn bpf_time_getns(unused1: u64, unused2: u64, unused3: u64, unused4: u64, unused5: u64) -> u64 {
+#[cfg(feature = "std")]
+pub fn bpf_time_getns (unused1: u64, unused2: u64, unused3: u64, unused4: u64, unused5: u64) -> u64 {
     time::precise_time_ns()
 }
 
@@ -94,8 +98,8 @@ pub const BPF_TRACE_PRINTK_IDX: u32 = 6;
 /// program is run.
 #[allow(dead_code)]
 #[allow(unused_variables)]
-pub fn bpf_trace_printf(unused1: u64, unused2: u64, arg3: u64, arg4: u64, arg5: u64) -> u64 {
-    #[cfg(feature = "std")]
+#[cfg(feature = "std")]
+pub fn bpf_trace_printf (unused1: u64, unused2: u64, arg3: u64, arg4: u64, arg5: u64) -> u64 {
     println!("bpf_trace_printf: {arg3:#x}, {arg4:#x}, {arg5:#x}");
     let size_arg = |x| {
         if x == 0 {
@@ -191,8 +195,8 @@ pub fn memfrob(ptr: u64, len: u64, unused3: u64, unused4: u64, unused5: u64) -> 
 /// ```
 #[allow(dead_code)]
 #[allow(unused_variables)]
-#[cfg(std)]
-pub fn sqrti(arg1: u64, unused2: u64, unused3: u64, unused4: u64, unused5: u64) -> u64 {
+#[cfg(feature = "std")] // sqrt is only available when using `std`
+pub fn sqrti (arg1: u64, unused2: u64, unused3: u64, unused4: u64, unused5: u64) -> u64 {
     (arg1 as f64).sqrt() as u64
 }
 
@@ -259,9 +263,11 @@ pub fn strcmp(arg1: u64, arg2: u64, arg3: u64, unused4: u64, unused5: u64) -> u6
 /// ```
 #[allow(dead_code)]
 #[allow(unused_variables)]
-#[cfg(std)]
-pub fn rand(min: u64, max: u64, unused3: u64, unused4: u64, unused5: u64) -> u64 {
-    let mut n = unsafe { (libc::rand() as u64).wrapping_shl(32) + libc::rand() as u64 };
+#[cfg(feature = "std")]
+pub fn rand (min: u64, max: u64, unused3: u64, unused4: u64, unused5: u64) -> u64 {
+    let mut n = unsafe {
+        (libc::rand() as u64).wrapping_shl(32) + libc::rand() as u64
+    };
     if min < max {
         n = n % (max + 1 - min) + min;
     };

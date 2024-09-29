@@ -20,9 +20,10 @@ use byteorder::{ByteOrder, LittleEndian};
 use log::debug;
 use num_derive::FromPrimitive;
 use stdlib::collections::Vec;
+use crate::lib::*;
 
 /// Maximum number of instructions in an eBPF program.
-pub const PROG_MAX_INSNS: usize = 4096;
+pub const PROG_MAX_INSNS: usize = 1000000;
 /// Size of an eBPF instructions, in bytes.
 pub const INSN_SIZE: usize = 8;
 /// Maximum size of an eBPF program, in bytes.

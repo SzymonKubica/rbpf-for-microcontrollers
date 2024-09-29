@@ -26,12 +26,14 @@
         unreadable_literal
     )
 )]
+// Configures the crate to be `no_std` when `std` feature is disabled.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "std")]
 extern crate alloc;
 extern crate byteorder;
 extern crate combine;
+
 #[cfg(feature = "std")]
 extern crate core;
 extern crate goblin;
@@ -39,7 +41,12 @@ extern crate num;
 extern crate num_derive;
 extern crate libm;
 extern crate log;
+extern crate log;
+#[cfg(feature = "std")]
 extern crate time;
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 #[cfg(feature = "cranelift")]
 extern crate cranelift_codegen;
@@ -60,14 +67,6 @@ include!("./without_std.rs");
 #[cfg(not(feature = "std"))]
 include!("./with_alloc.rs");
 
-mod stdlib {
-    #[cfg(not(feature = "std"))]
-    pub use crate::with_alloc::*;
-    #[cfg(feature = "std")]
-    pub use crate::with_std::*;
-    #[cfg(not(feature = "std"))]
-    pub use crate::without_std::*;
-}
 
 use alloc::boxed::Box;
 use binary_layouts::{ExtendedHeaderBinary, FemtoContainersBinary, RawElfFileBinary};
@@ -77,6 +76,8 @@ use stdlib::collections::BTreeMap;
 use stdlib::collections::{vec, Vec};
 use stdlib::u32;
 use stdlib::{Error, ErrorKind};
+use crate::lib::*;
+use byteorder::{ByteOrder, LittleEndian};
 
 #[cfg(std)]
 mod asm_parser;
@@ -90,6 +91,7 @@ pub mod ebpf;
 pub mod helpers;
 pub mod insn_builder;
 mod interpreter;
+<<<<<<< HEAD
 mod interpreter_generic;
 mod jit_thumbv7em;
 mod thumb_16bit_encoding;
@@ -97,8 +99,10 @@ mod thumb_32bit_encoding;
 mod thumbv7em;
 
 pub use verifier::check_helpers;
-#[cfg(jit)]
+#[cfg(all(not(windows), feature = "std"))]
 mod jit;
+#[cfg(not(feature = "std"))]
+mod no_std_error;
 mod verifier;
 
 /// Specifies the available variants of the interpreters that are used to execute
@@ -134,6 +138,59 @@ pub enum InterpreterVariant {
     /// applied to them. It uses the `goblin` elf parser to extract the first
     /// instruction in the program.
     RawObjectFile,
+}
+
+/// Reexports all the types needed from the `std`, `core`, and `alloc`
+/// crates. This avoids elaborate import wrangling having to happen in every
+/// module. Inspired by the design used in `serde`.
+pub mod lib {
+    mod core {
+        #[cfg(not(feature = "std"))]
+        pub use core::*;
+        #[cfg(feature = "std")]
+        pub use std::*;
+    }
+
+    pub use self::core::convert::TryInto;
+    pub use self::core::mem;
+    pub use self::core::mem::ManuallyDrop;
+    pub use self::core::ptr;
+
+    pub use self::core::{f64, u32, u64};
+
+    #[cfg(feature = "std")]
+    pub use std::println;
+
+    #[cfg(not(feature = "std"))]
+    pub use alloc::vec;
+    #[cfg(not(feature = "std"))]
+    pub use alloc::vec::Vec;
+    #[cfg(feature = "std")]
+    pub use std::vec::Vec;
+
+    #[cfg(not(feature = "std"))]
+    pub use alloc::string::{String, ToString};
+    #[cfg(feature = "std")]
+    pub use std::string::{String, ToString};
+
+    // In no_std we cannot use randomness for hashing, thus we need to use
+    // BTree-based implementations of Maps and Sets. The cranelift module uses
+    // BTrees by default, hence we need to expose it twice here.
+    #[cfg(not(feature = "std"))]
+    pub use alloc::collections::{BTreeMap as HashMap, BTreeMap, BTreeSet as HashSet, BTreeSet};
+    #[cfg(feature = "std")]
+    pub use std::collections::{BTreeMap, HashMap, HashSet};
+
+    /// In no_std we use a custom implementation of the error which acts as a
+    /// replacement for the io Error.
+    #[cfg(not(feature = "std"))]
+    pub use crate::no_std_error::{Error, ErrorKind};
+    #[cfg(feature = "std")]
+    pub use std::io::{Error, ErrorKind};
+
+    #[cfg(not(feature = "std"))]
+    pub use alloc::format;
+>>>>>>> upstream/main
 }
 
 /// eBPF verification function that returns an error if the program does not meet its requirements.
@@ -194,12 +251,14 @@ struct MetaBuff {
 pub struct EbpfVmMbuff<'a> {
     prog: Option<&'a [u8]>,
     verifier: Verifier,
+    /// This is the jit memory that is dedicated to the ARMv7-eM JIT compiler
     jit: Option<jit_thumbv7em::JitMemory<'a>>,
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     jit: Option<jit::JitMemory<'a>>,
     #[cfg(feature = "cranelift")]
     cranelift_prog: Option<cranelift::CraneliftProgram>,
-    helpers: BTreeMap<u32, ebpf::Helper>,
+    helpers: HashMap<u32, ebpf::Helper>,
+    allowed_memory: HashSet<u64>,
     interpreter_variant: InterpreterVariant,
 }
 
@@ -231,11 +290,13 @@ impl<'a> EbpfVmMbuff<'a> {
             prog,
             verifier: Self::get_verifier(interpreter_variant),
             jit: None,
-            #[cfg(jit)]
+            verifier: verifier::check,
+            #[cfg(all(not(windows), feature = "std"))]
             jit: None,
             #[cfg(feature = "cranelift")]
             cranelift_prog: None,
-            helpers: BTreeMap::new(),
+            helpers: HashMap::new(),
+            allowed_memory: HashSet::new(),
             interpreter_variant,
         })
     }
@@ -311,7 +372,7 @@ impl<'a> EbpfVmMbuff<'a> {
     /// # Examples
     ///
     /// ```
-    /// use std::io::{Error, ErrorKind};
+    /// use rbpf::lib::{Error, ErrorKind};
     /// use rbpf::ebpf;
     ///
     /// // Define a simple verifier function.
@@ -397,11 +458,52 @@ impl<'a> EbpfVmMbuff<'a> {
     /// // Register a helper.
     /// // On running the program this helper will print the content of registers r3, r4 and r5 to
     /// // standard output.
+    /// # #[cfg(feature = "std")]
     /// vm.register_helper(6, helpers::bpf_trace_printf).unwrap();
     /// ```
     pub fn register_helper(&mut self, key: u32, function: Helper) -> Result<(), Error> {
         self.helpers.insert(key, function);
         Ok(())
+    }
+
+    /// Register a set of addresses that the eBPF program is allowed to load and store.
+    ///
+    /// When using certain helpers, typically map lookups, the Linux kernel will return pointers
+    /// to structs that the eBPF program needs to interact with. By default rbpf only allows the
+    /// program to interact with its stack, the memory buffer and the program itself, making it
+    /// impossible to supply functional implementations of these helpers.
+    /// This option allows you to pass in a list of addresses that rbpf will allow the program
+    /// to load and store to. Given Rust's memory model you will always know these addresses up
+    /// front when implementing the helpers.
+    ///
+    /// Each invocation of this method will append to the set of allowed addresses.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use std::ptr::addr_of;
+    ///
+    /// struct MapValue {
+    ///     data: u8
+    /// }
+    /// static VALUE: MapValue = MapValue { data: 1 };
+    ///
+    /// let prog = &[
+    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    /// ];
+    ///
+    /// // Instantiate a VM.
+    /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog)).unwrap();
+    /// let start = addr_of!(VALUE) as u64;
+    /// let addrs = Vec::from_iter(start..start+size_of::<MapValue>() as u64);
+    /// vm.register_allowed_memory(&addrs);
+    /// ```
+    pub fn register_allowed_memory(&mut self, addrs: &[u64]) -> () {
+        for i in addrs {
+            self.allowed_memory.insert(*i);
+        }
     }
 
     /// Execute the program loaded, with the given packet data and metadata buffer.
@@ -532,7 +634,7 @@ impl<'a> EbpfVmMbuff<'a> {
     ///
     /// vm.jit_compile();
     /// ```
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     pub fn jit_compile(&mut self) -> Result<(), Error> {
         let prog = match self.prog {
             Some(prog) => prog,
@@ -587,17 +689,17 @@ impl<'a> EbpfVmMbuff<'a> {
     /// // Instantiate a VM.
     /// let mut vm = rbpf::EbpfVmMbuff::new(Some(prog)).unwrap();
     ///
-    /// # #[cfg(jit)]
+    /// # #[cfg(all(not(windows), feature = "std"))]
     /// vm.jit_compile();
     ///
     /// // Provide both a reference to the packet data, and to the metadata buffer.
-    /// # #[cfg(jit)]
+    /// # #[cfg(all(not(windows), feature = "std"))]
     /// unsafe {
     ///     let res = vm.execute_program_jit(mem, &mut mbuff).unwrap();
     ///     assert_eq!(res, 0x2211);
     /// }
     /// ```
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     pub unsafe fn execute_program_jit(
         &self,
         mem: &mut [u8],
@@ -749,7 +851,7 @@ impl<'a> EbpfVmMbuff<'a> {
         //  in the kernel; anyway the verifier would prevent the use of uninitialized registers).
         //  See `mul_loop` test.
         let mem_ptr = match mem.len() {
-            0 => std::ptr::null_mut(),
+            0 => ptr::null_mut(),
             _ => mem.as_ptr() as *mut u8,
         };
 
@@ -931,7 +1033,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// # Examples
     ///
     /// ```
-    /// use std::io::{Error, ErrorKind};
+    /// use rbpf::lib::{Error, ErrorKind};
     /// use rbpf::ebpf;
     ///
     /// // Define a simple verifier function.
@@ -990,37 +1092,39 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// # Examples
     ///
     /// ```
-    /// use rbpf::helpers;
+    /// #[cfg(feature = "std")] {
+    ///     use rbpf::helpers;
     ///
-    /// // This program was compiled with clang, from a C program containing the following single
-    /// // instruction: `return bpf_trace_printk("foo %c %c %c\n", 10, 1, 2, 3);`
-    /// let prog = &[
-    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
-    ///     0x79, 0x12, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // load mem from r1[0x40] to r2
-    ///     0x07, 0x02, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, // add r2, 5
-    ///     0x79, 0x11, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, // load mem_end from r1[0x50] to r1
-    ///     0x2d, 0x12, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, // if r2 > r1 skip 6 instructions
-    ///     0x71, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // load r2 (= *(mem + 5)) into r1
-    ///     0xb7, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r2, 0
-    ///     0xb7, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r3, 0
-    ///     0xb7, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r4, 0
-    ///     0xb7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r5, 0
-    ///     0x85, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // call helper with key 1
-    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
-    /// ];
+    ///     // This program was compiled with clang, from a C program containing the following single
+    ///     // instruction: `return bpf_trace_printk("foo %c %c %c\n", 10, 1, 2, 3);`
+    ///     let prog = &[
+    ///         0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///         0x79, 0x12, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // load mem from r1[0x40] to r2
+    ///         0x07, 0x02, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, // add r2, 5
+    ///         0x79, 0x11, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, // load mem_end from r1[0x50] to r1
+    ///         0x2d, 0x12, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, // if r2 > r1 skip 6 instructions
+    ///         0x71, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // load r2 (= *(mem + 5)) into r1
+    ///         0xb7, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r2, 0
+    ///         0xb7, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r3, 0
+    ///         0xb7, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r4, 0
+    ///         0xb7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r5, 0
+    ///         0x85, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // call helper with key 1
+    ///         0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    ///     ];
     ///
-    /// let mem = &mut [
-    ///     0xaa, 0xbb, 0x11, 0x22, 0xcc, 0x09,
-    /// ];
+    ///     let mem = &mut [
+    ///         0xaa, 0xbb, 0x11, 0x22, 0xcc, 0x09,
+    ///     ];
     ///
-    /// // Instantiate a VM.
-    /// let mut vm = rbpf::EbpfVmFixedMbuff::new(Some(prog), 0x40, 0x50).unwrap();
+    ///     // Instantiate a VM.
+    ///     let mut vm = rbpf::EbpfVmFixedMbuff::new(Some(prog), 0x40, 0x50).unwrap();
     ///
-    /// // Register a helper. This helper will store the result of the square root of r1 into r0.
-    /// vm.register_helper(1, helpers::sqrti);
+    ///     // Register a helper. This helper will store the result of the square root of r1 into r0.
+    ///     vm.register_helper(1, helpers::sqrti);
     ///
-    /// let res = vm.execute_program(mem).unwrap();
-    /// assert_eq!(res, 3);
+    ///     let res = vm.execute_program(mem).unwrap();
+    ///     assert_eq!(res, 3);
+    /// }
     /// ```
     pub fn register_helper(
         &mut self,
@@ -1028,6 +1132,44 @@ impl<'a> EbpfVmFixedMbuff<'a> {
         function: fn(u64, u64, u64, u64, u64) -> u64,
     ) -> Result<(), Error> {
         self.parent.register_helper(key, function)
+    }
+
+    /// Register an object that the eBPF program is allowed to load and store.
+    ///
+    /// When using certain helpers, typically map lookups, the Linux kernel will return pointers
+    /// to structs that the eBPF program needs to interact with. By default rbpf only allows the
+    /// program to interact with its stack, the memory buffer and the program itself, making it
+    /// impossible to supply functional implementations of these helpers.
+    /// This option allows you to pass in a list of addresses that rbpf will allow the program
+    /// to load and store to. Given Rust's memory model you will always know these addresses up
+    /// front when implementing the helpers.
+    ///
+    /// Each invocation of this method will append to the set of allowed addresses.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use std::ptr::addr_of;
+    ///
+    /// struct MapValue {
+    ///     data: u8
+    /// }
+    /// static VALUE: MapValue = MapValue { data: 1 };
+    ///
+    /// let prog = &[
+    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    /// ];
+    ///
+    /// // Instantiate a VM.
+    /// let mut vm = rbpf::EbpfVmFixedMbuff::new(Some(prog), 0x40, 0x50).unwrap();
+    /// let start = addr_of!(VALUE) as u64;
+    /// let addrs = Vec::from_iter(start..start+size_of::<MapValue>() as u64);
+    /// vm.register_allowed_memory(&addrs);
+    /// ```
+    pub fn register_allowed_memory(&mut self, allowed: &[u64]) -> () {
+        self.parent.register_allowed_memory(allowed)
     }
 
     /// Execute the program loaded, with the given packet data.
@@ -1101,7 +1243,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     ///
     /// vm.jit_compile();
     /// ```
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     pub fn jit_compile(&mut self) -> Result<(), Error> {
         let prog = match self.parent.prog {
             Some(prog) => prog,
@@ -1150,11 +1292,11 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// // Instantiate a VM. Note that we provide the start and end offsets for mem pointers.
     /// let mut vm = rbpf::EbpfVmFixedMbuff::new(Some(prog), 0x40, 0x50).unwrap();
     ///
-    /// # #[cfg(jit)]
+    /// # #[cfg(all(not(windows), feature = "std"))]
     /// vm.jit_compile();
     ///
     /// // Provide only a reference to the packet data. We do not manage the metadata buffer.
-    /// # #[cfg(jit)]
+    /// # #[cfg(all(not(windows), feature = "std"))]
     /// unsafe {
     ///     let res = vm.execute_program_jit(mem).unwrap();
     ///     assert_eq!(res, 0xdd);
@@ -1162,14 +1304,14 @@ impl<'a> EbpfVmFixedMbuff<'a> {
     /// ```
     // This struct redefines the `execute_program_jit()` function, in order to pass the offsets
     // associated with the fixed mbuff.
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     pub unsafe fn execute_program_jit(&mut self, mem: &'a mut [u8]) -> Result<u64, Error> {
         // If packet data is empty, do not send the address of an empty slice; send a null pointer
         //  as first argument instead, as this is uBPF's behavior (empty packet should not happen
         //  in the kernel; anyway the verifier would prevent the use of uninitialized registers).
         //  See `mul_loop` test.
         let mem_ptr = match mem.len() {
-            0 => std::ptr::null_mut(),
+            0 => ptr::null_mut(),
             _ => mem.as_ptr() as *mut u8,
         };
 
@@ -1271,7 +1413,7 @@ impl<'a> EbpfVmFixedMbuff<'a> {
         //  in the kernel; anyway the verifier would prevent the use of uninitialized registers).
         //  See `mul_loop` test.
         let mem_ptr = match mem.len() {
-            0 => std::ptr::null_mut(),
+            0 => ptr::null_mut(),
             _ => mem.as_ptr() as *mut u8,
         };
 
@@ -1395,7 +1537,7 @@ impl<'a> EbpfVmRaw<'a> {
     /// # Examples
     ///
     /// ```
-    /// use std::io::{Error, ErrorKind};
+    /// use rbpf::lib::{Error, ErrorKind};
     /// use rbpf::ebpf;
     ///
     /// // Define a simple verifier function.
@@ -1454,30 +1596,32 @@ impl<'a> EbpfVmRaw<'a> {
     /// # Examples
     ///
     /// ```
-    /// use rbpf::helpers;
+    /// #[cfg(feature = "std")] {
+    ///     use rbpf::helpers;
     ///
-    /// let prog = &[
-    ///     0x79, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // ldxdw r1, r1[0x00]
-    ///     0xb7, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r2, 0
-    ///     0xb7, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r3, 0
-    ///     0xb7, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r4, 0
-    ///     0xb7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r5, 0
-    ///     0x85, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // call helper with key 1
-    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
-    /// ];
+    ///     let prog = &[
+    ///         0x79, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // ldxdw r1, r1[0x00]
+    ///         0xb7, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r2, 0
+    ///         0xb7, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r3, 0
+    ///         0xb7, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r4, 0
+    ///         0xb7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r5, 0
+    ///         0x85, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // call helper with key 1
+    ///         0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    ///     ];
     ///
-    /// let mem = &mut [
-    ///     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
-    /// ];
+    ///     let mem = &mut [
+    ///         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+    ///     ];
     ///
-    /// // Instantiate a VM.
-    /// let mut vm = rbpf::EbpfVmRaw::new(Some(prog)).unwrap();
+    ///     // Instantiate a VM.
+    ///     let mut vm = rbpf::EbpfVmRaw::new(Some(prog)).unwrap();
     ///
-    /// // Register a helper. This helper will store the result of the square root of r1 into r0.
-    /// vm.register_helper(1, helpers::sqrti);
+    ///     // Register a helper. This helper will store the result of the square root of r1 into r0.
+    ///     vm.register_helper(1, helpers::sqrti);
     ///
-    /// let res = vm.execute_program(mem).unwrap();
-    /// assert_eq!(res, 0x10000000);
+    ///     let res = vm.execute_program(mem).unwrap();
+    ///     assert_eq!(res, 0x10000000);
+    /// }
     /// ```
     pub fn register_helper(
         &mut self,
@@ -1485,6 +1629,44 @@ impl<'a> EbpfVmRaw<'a> {
         function: fn(u64, u64, u64, u64, u64) -> u64,
     ) -> Result<(), Error> {
         self.parent.register_helper(key, function)
+    }
+
+    /// Register an object that the eBPF program is allowed to load and store.
+    ///
+    /// When using certain helpers, typically map lookups, the Linux kernel will return pointers
+    /// to structs that the eBPF program needs to interact with. By default rbpf only allows the
+    /// program to interact with its stack, the memory buffer and the program itself, making it
+    /// impossible to supply functional implementations of these helpers.
+    /// This option allows you to pass in a list of addresses that rbpf will allow the program
+    /// to load and store to. Given Rust's memory model you will always know these addresses up
+    /// front when implementing the helpers.
+    ///
+    /// Each invocation of this method will append to the set of allowed addresses.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use std::ptr::addr_of;
+    ///
+    /// struct MapValue {
+    ///     data: u8
+    /// }
+    /// static VALUE: MapValue = MapValue { data: 1 };
+    ///
+    /// let prog = &[
+    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    /// ];
+    ///
+    /// // Instantiate a VM.
+    /// let mut vm = rbpf::EbpfVmRaw::new(Some(prog)).unwrap();
+    /// let start = addr_of!(VALUE) as u64;
+    /// let addrs = Vec::from_iter(start..start+size_of::<MapValue>() as u64);
+    /// vm.register_allowed_memory(&addrs);
+    /// ```
+    pub fn register_allowed_memory(&mut self, allowed: &[u64]) -> () {
+        self.parent.register_allowed_memory(allowed)
     }
 
     /// Execute the program loaded, with the given packet data.
@@ -1531,7 +1713,7 @@ impl<'a> EbpfVmRaw<'a> {
     ///
     /// vm.jit_compile();
     /// ```
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     pub fn jit_compile(&mut self) -> Result<(), Error> {
         let prog = match self.parent.prog {
             Some(prog) => prog,
@@ -1577,16 +1759,16 @@ impl<'a> EbpfVmRaw<'a> {
     ///
     /// let mut vm = rbpf::EbpfVmRaw::new(Some(prog)).unwrap();
     ///
-    /// # #[cfg(jit)]
+    /// # #[cfg(all(not(windows), feature = "std"))]
     /// vm.jit_compile();
     ///
-    /// # #[cfg(jit)]
+    /// # #[cfg(all(not(windows), feature = "std"))]
     /// unsafe {
     ///     let res = vm.execute_program_jit(mem).unwrap();
     ///     assert_eq!(res, 0x22cc);
     /// }
     /// ```
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     pub unsafe fn execute_program_jit(&self, mem: &'a mut [u8]) -> Result<u64, Error> {
         let mut mbuff = vec![];
         self.parent.execute_program_jit(mem, &mut mbuff)
@@ -1765,7 +1947,7 @@ impl<'a> EbpfVmNoData<'a> {
     /// # Examples
     ///
     /// ```
-    /// use std::io::{Error, ErrorKind};
+    /// use rbpf::lib::{Error, ErrorKind};
     /// use rbpf::ebpf;
     ///
     /// // Define a simple verifier function.
@@ -1824,25 +2006,27 @@ impl<'a> EbpfVmNoData<'a> {
     /// # Examples
     ///
     /// ```
-    /// use rbpf::helpers;
+    /// #[cfg(feature = "std")] {
+    ///     use rbpf::helpers;
     ///
-    /// let prog = &[
-    ///     0xb7, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // mov r1, 0x010000000
-    ///     0xb7, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r2, 0
-    ///     0xb7, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r3, 0
-    ///     0xb7, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r4, 0
-    ///     0xb7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r5, 0
-    ///     0x85, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // call helper with key 1
-    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
-    /// ];
+    ///     let prog = &[
+    ///         0xb7, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // mov r1, 0x010000000
+    ///         0xb7, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r2, 0
+    ///         0xb7, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r3, 0
+    ///         0xb7, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r4, 0
+    ///         0xb7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r5, 0
+    ///         0x85, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // call helper with key 1
+    ///         0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    ///     ];
     ///
-    /// let mut vm = rbpf::EbpfVmNoData::new(Some(prog)).unwrap();
+    ///     let mut vm = rbpf::EbpfVmNoData::new(Some(prog)).unwrap();
     ///
-    /// // Register a helper. This helper will store the result of the square root of r1 into r0.
-    /// vm.register_helper(1, helpers::sqrti).unwrap();
+    ///     // Register a helper. This helper will store the result of the square root of r1 into r0.
+    ///     vm.register_helper(1, helpers::sqrti).unwrap();
     ///
-    /// let res = vm.execute_program().unwrap();
-    /// assert_eq!(res, 0x1000);
+    ///     let res = vm.execute_program().unwrap();
+    ///     assert_eq!(res, 0x1000);
+    /// }
     /// ```
     pub fn register_helper(
         &mut self,
@@ -1850,6 +2034,44 @@ impl<'a> EbpfVmNoData<'a> {
         function: fn(u64, u64, u64, u64, u64) -> u64,
     ) -> Result<(), Error> {
         self.parent.register_helper(key, function)
+    }
+
+    /// Register an object that the eBPF program is allowed to load and store.
+    ///
+    /// When using certain helpers, typically map lookups, the Linux kernel will return pointers
+    /// to structs that the eBPF program needs to interact with. By default rbpf only allows the
+    /// program to interact with its stack, the memory buffer and the program itself, making it
+    /// impossible to supply functional implementations of these helpers.
+    /// This option allows you to pass in a list of addresses that rbpf will allow the program
+    /// to load and store to. Given Rust's memory model you will always know these addresses up
+    /// front when implementing the helpers.
+    ///
+    /// Each invocation of this method will append to the set of allowed addresses.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use std::ptr::addr_of;
+    ///
+    /// struct MapValue {
+    ///     data: u8
+    /// }
+    /// static VALUE: MapValue = MapValue { data: 1 };
+    ///
+    /// let prog = &[
+    ///     0xb7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov r0, 0
+    ///     0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // exit
+    /// ];
+    ///
+    /// // Instantiate a VM.
+    /// let mut vm = rbpf::EbpfVmNoData::new(Some(prog)).unwrap();
+    /// let start = addr_of!(VALUE) as u64;
+    /// let addrs = Vec::from_iter(start..start+size_of::<MapValue>() as u64);
+    /// vm.register_allowed_memory(&addrs);
+    /// ```
+    pub fn register_allowed_memory(&mut self, allowed: &[u64]) -> () {
+        self.parent.register_allowed_memory(allowed)
     }
 
     /// JIT-compile the loaded program. No argument required for this.
@@ -1871,7 +2093,7 @@ impl<'a> EbpfVmNoData<'a> {
     ///
     /// vm.jit_compile();
     /// ```
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     pub fn jit_compile(&mut self) -> Result<(), Error> {
         self.parent.jit_compile()
     }
@@ -1920,16 +2142,16 @@ impl<'a> EbpfVmNoData<'a> {
     ///
     /// let mut vm = rbpf::EbpfVmNoData::new(Some(prog)).unwrap();
     ///
-    /// # #[cfg(jit)]
+    /// # #[cfg(all(not(windows), feature = "std"))]
     /// vm.jit_compile();
     ///
-    /// # #[cfg(jit)]
+    /// # #[cfg(all(not(windows), feature = "std"))]
     /// unsafe {
     ///     let res = vm.execute_program_jit().unwrap();
     ///     assert_eq!(res, 0x1122);
     /// }
     /// ```
-    #[cfg(jit)]
+    #[cfg(all(not(windows), feature = "std"))]
     pub unsafe fn execute_program_jit(&self) -> Result<u64, Error> {
         self.parent.execute_program_jit(&mut [])
     }

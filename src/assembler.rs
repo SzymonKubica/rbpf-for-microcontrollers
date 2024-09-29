@@ -6,13 +6,10 @@
 use asm_parser::{Instruction, Operand, parse};
 use ebpf;
 use ebpf::Insn;
-use stdlib::collections::HashMap;
-use stdlib::String;
-use stdlib::ToString;
-use stdlib::collections::Vec;
 use self::InstructionType::{AluBinary, AluUnary, LoadAbs, LoadInd, LoadImm, LoadReg, StoreImm,
                             StoreReg, JumpUnconditional, JumpConditional, Call, Endian, NoOperand};
 use asm_parser::Operand::{Integer, Memory, Register, Nil};
+use crate::lib::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum InstructionType {
