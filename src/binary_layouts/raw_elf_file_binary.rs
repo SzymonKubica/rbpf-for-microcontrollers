@@ -89,7 +89,7 @@ impl CallInstructionHandler for RawElfFileBinary<'_> {
                 // Here the source register 1 indicates that we are making
                 // a call relative to the current instruction pointer
                 return_address_stack.push(*insn_ptr);
-                *insn_ptr = ((*insn_ptr as i32 + insn.imm() + insn_ptr_step_size as i32) as usize) as usize;
+                *insn_ptr = ((*insn_ptr as i32 + insn.imm() * insn_ptr_step_size as i32) as usize) as usize;
             }
             3 => {
                 // This is a hacky implementation of calling functions
