@@ -16,6 +16,7 @@
 //! value. Hence some helpers have unused arguments, or return a 0 value in all cases, in order to
 //! respect this convention.
 
+#[cfg(feature = "std")]
 use libm::{floor, log};
 #[cfg(feature = "std")]
 extern crate libc;

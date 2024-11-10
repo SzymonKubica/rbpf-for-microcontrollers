@@ -13,6 +13,7 @@ pub struct Error {
     #[allow(dead_code)]
     kind: ErrorKind,
     #[allow(dead_code)]
+    /// Actual error message
     pub error: String,
 }
 

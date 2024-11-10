@@ -285,6 +285,10 @@ impl<'a> EbpfVmMbuff<'a> {
         })
     }
 
+    /// intitializes the verifier dynamically based on the interpreter variant.
+    /// The reason we need to do this is that we need to get a function that
+    /// takes in a program so we need to sort of bake in the other argument
+    /// (the interpreter variant) dynamically
     pub fn get_verifier(interpreter_variant: InterpreterVariant) -> fn(&[u8]) -> Result<(), Error> {
         match interpreter_variant {
             InterpreterVariant::Default => {
@@ -332,6 +336,8 @@ impl<'a> EbpfVmMbuff<'a> {
         (self.verifier)(self.prog.unwrap())
     }
 
+    /// Verify a program without loading it into the virtual machine.
+    /// It dynamically matches depending on the required interpreter variant.
     pub fn verify_program(
         interpreter_variant: InterpreterVariant,
         program: &[u8],
@@ -717,6 +723,11 @@ impl<'a> EbpfVmMbuff<'a> {
         }
     }
 
+    /// This is a no-std version of executing the program using the JIT compiler
+    /// currently only the ARMv7-eM ISA is supported and it runs on STM32
+    /// microcontrollers.
+    ///
+    /// TODO: figure out why we need this function together with the one above.
     pub unsafe fn execute_program_jit(
         &self,
         mem: &mut [u8],

@@ -41,6 +41,7 @@ pub const DATA_PROCESSING: InstructionClassOpcode = InstructionClassOpcode::new(
 /// Special data instructions and branch and exchange
 pub const SPECIAL_DATA_INSTRUCTIONS: InstructionClassOpcode =
     InstructionClassOpcode::new(0b010001, 6);
+#[allow(dead_code)]
 /// Load/store single data item - this set of instructions doesn't have a fixed prefix
 pub const LOAD_STORE_SINGLE_ITEM: InstructionClassOpcode = InstructionClassOpcode::new(0b0, 0);
 /// Miscellaneous 16-bit instructions

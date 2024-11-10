@@ -21,16 +21,14 @@ pub const R8: u8 = 8;
 pub const R9: u8 = 9;
 pub const R10: u8 = 10;
 pub const R11: u8 = 11;
+#[allow(dead_code)]
 pub const R12: u8 = 12;
 pub const SP: u8 = 13;
 pub const LR: u8 = 14;
 pub const PC: u8 = 15;
 
-pub const ARGUMENT_REGISTERS: [u8; 4] = [R0, R1, R2, R3];
-
-pub const CALLEE_SAVED_REGISTERS: [u8; 7] = [R4, R5, R6, R7, R8, R10, R11];
-
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Condition {
     /// Equal
     EQ = 0b0000,
@@ -71,6 +69,11 @@ pub enum Condition {
 /// By convention, if the enum member name ends with Immediate, then the instruction
 /// includes the immediate operand, otherwise the instruction operates purely on
 /// registers.
+///
+/// Note that some of the instruction types aren't used as they weren't required
+/// to implement JIT compilation from eBPF. They are included here to preserve
+/// completeness against the ARMv7-eM ISA specification.
+#[allow(dead_code)]
 pub enum ThumbInstruction {
     // Shift (immediate), add, subtract, move, and compare
     LogicalShiftLeftImmediate {

@@ -182,6 +182,7 @@ pub struct Imm12OneRegEncoding {
     imm12: u16,
 }
 
+#[allow(dead_code)]
 impl Imm12OneRegEncoding {
     pub fn new(opcode: Opcode, rn: u8, imm12: u16) -> Imm12OneRegEncoding {
         Imm12OneRegEncoding {

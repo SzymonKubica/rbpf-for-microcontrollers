@@ -31,23 +31,6 @@ use crate::InterpreterVariant;
 /// - mem length
 type MachineCode = unsafe fn(*mut u8, usize, *mut u8, usize) -> u32;
 
-const PAGE_SIZE: usize = 4096;
-// TODO: check how long the page must be to be sure to support an eBPF program of maximum possible
-// length
-const NUM_PAGES: usize = 1;
-
-// Special values for target_pc in struct Jump
-const TARGET_OFFSET: isize = ebpf::PROG_MAX_INSNS as isize;
-const TARGET_PC_EXIT: isize = TARGET_OFFSET + 1;
-
-#[derive(Copy, Clone)]
-enum OperandSize {
-    S8 = 8,
-    S16 = 16,
-    S32 = 32,
-    S64 = 64,
-}
-
 const REGISTER_MAP_SIZE: usize = 11;
 // Mapps from the the ARMv7-eM registers to the eBPF registers
 // Note that the annotations on the right describe the function of the register
@@ -111,6 +94,8 @@ struct Jump {
     condition: Condition,
 }
 
+/// The JIT compiler structure. It is responsible for translating eBPF bytecode
+/// into the ARMv7-eM instructions that run natively on the target microcontrollers
 #[derive(Debug)]
 pub struct JitCompiler {
     /// Program counter locations in the JIT-compiled code. This is needed
@@ -120,24 +105,21 @@ pub struct JitCompiler {
     /// the actual eBPF instructions start so that we can adjust branch offsets
     /// accordingly later on.
     pc_locations: Vec<usize>,
-    special_targets: HashMap<isize, usize>,
     jumps: Vec<Jump>,
-    /// Specifies the binary laout of the eBPF program code buffer so that the
-    /// jit compiler is able to extract the text section from it and start translating
-    /// instructions.
-    interpreter_variant: InterpreterVariant,
 }
 
 /// Type alias for conciseness
 type I = ThumbInstruction;
 
 impl JitCompiler {
-    pub fn new(interpreter: InterpreterVariant) -> JitCompiler {
+    /// Creates a new instance of the JIT compiler.
+    /// Note: this used to specify the interpreter variant, however only the
+    /// raw object file binary format is supported for jit compilation at the moment
+    /// and so we don't specify it here anymore.
+    pub fn new() -> JitCompiler {
         JitCompiler {
             pc_locations: vec![],
             jumps: vec![],
-            special_targets: HashMap::new(),
-            interpreter_variant: interpreter,
         }
     }
     fn jit_compile(
@@ -151,8 +133,8 @@ impl JitCompiler {
         // In the future we'll support other binary layouts, for now only raw
         // object file is supported for the JIT.
 
-        let mut data_addr = 0;
-        let mut rodata_addr = 0;
+        let mut data_addr;
+        let mut rodata_addr;
 
         {
             let binary: Box<dyn Binary> = Box::new(RawElfFileBinary::new(&prog)?);
@@ -888,55 +870,18 @@ impl JitCompiler {
         }
         Ok(())
     }
-
-    /// Verifies that a given immediate value fits into a bitstring of length
-    /// `size`.
-    fn verify_immediate_size(imm: i32, size: usize) -> Result<(), Error> {
-        if imm > (1 << size) {
-            Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "[JIT] Immediate {:#x} does not fit into {} bits.",
-                    imm, size
-                ),
-            ))?;
-        }
-        Ok(())
-    }
-
-    /// Verifies that a given offset value fits into a bitstring of length
-    /// `size`.
-    fn verify_offset_size(off: i16, size: usize) -> Result<(), Error> {
-        if off > (1 << size) {
-            Err(Error::new(
-                ErrorKind::Other,
-                format!("[JIT] Offset {:#x} does not fit into {} bits.", off, size),
-            ))?;
-        }
-        Ok(())
-    }
-
-    /// Some instructions only support registers in range R0-R7 because they
-    /// use 3 bits to specify the register number. Because of this, before
-    /// calling those functions we need to verify that the `src` and `dst` values
-    /// fit into 3 bits.
-    fn verify_register_low(reg: u8) -> Result<(), Error> {
-        if reg > 0b111 {
-            Err(Error::new(
-                ErrorKind::Other,
-                format!("[JIT] Register {} does not fit into 3 bits.", reg),
-            ))?;
-        }
-        Ok(())
-    }
-} // impl JitCompiler
+}
 
 /// Memory storing the JIT compiled program. Because we are planning to use it
 /// inside of RIOT, we take in an already intialized memory buffer then initialising
 /// the struct.
 pub struct JitMemory<'a> {
     contents: &'a mut [u8],
+    /// Offset of the text section inside of the jit-compiled program. We need
+    /// to keep track of this so that we know where is the first instruction
+    /// of the program that is to be executed.
     pub text_offset: usize,
+    /// Current offset in the memory buffer
     pub offset: usize,
 }
 
@@ -956,7 +901,9 @@ impl<'a> JitMemory<'a> {
         helpers: &HashMap<u32, ebpf::Helper>,
         use_mbuff: bool,
         update_data_ptr: bool,
-        interpreter_variant: InterpreterVariant,
+        // For now the interpreter variant is unused as the jit compiler only
+        // supports the raw object file interpreter format.
+        _interpreter_variant: InterpreterVariant,
     ) -> Result<JitMemory<'a>, Error> {
         let mut mem = JitMemory {
             contents: jit_memory_buff,
@@ -964,7 +911,7 @@ impl<'a> JitMemory<'a> {
             text_offset: 0,
         };
 
-        let mut jit = JitCompiler::new(interpreter_variant);
+        let mut jit = JitCompiler::new();
         jit.jit_compile(&mut mem, prog, use_mbuff, update_data_ptr, helpers)?;
         jit.resolve_jumps(&mut mem)?;
         Self::log_program_contents(&mem.contents, mem.offset, mem.text_offset);
@@ -1006,10 +953,6 @@ impl<'a> JitMemory<'a> {
             }
         }
         debug!("JIT program:\n{}", prog_str);
-    }
-
-    fn log_program(&self) {
-        Self::log_program_contents(&self.contents, self.offset, self.text_offset);
     }
 }
 
@@ -1124,8 +1067,6 @@ pub fn resolve_data_rodata_relocations(
 crate because that one depends on rbpf and we would have a circular dependency. */
 
 pub const INSTRUCTION_SIZE: usize = 8;
-const SYMBOL_SIZE: usize = 6;
-
 pub const LDDW_INSTRUCTION_SIZE: usize = 16;
 pub const LDDW_OPCODE: u32 = 0x18;
 pub const CALL_OPCODE: u32 = 0x85;

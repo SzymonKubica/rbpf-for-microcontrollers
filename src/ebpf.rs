@@ -14,7 +14,7 @@
 //! <https://www.kernel.org/doc/Documentation/networking/filter.txt>, or for a shorter version of
 //! the list of the operation codes: <https://github.com/iovisor/bpf-docs/blob/master/eBPF.md>
 
-use core::fmt::{self, Debug, Formatter};
+use core::fmt::{Debug, Formatter};
 
 use byteorder::{ByteOrder, LittleEndian};
 use num_derive::FromPrimitive;
@@ -429,6 +429,10 @@ pub const TAIL_CALL: u8 = BPF_JMP | BPF_X | BPF_CALL;
 /// BPF opcode: `exit` /// `return r0`.
 pub const EXIT: u8 = BPF_JMP | BPF_EXIT;
 
+/// This enum was introduced hoping that it might help the optimiser generate
+/// a jumptable for the main switch statement in the body of the interpreter.
+/// Unfortunately this didn't change performance compared to using the raw
+/// constants that are defined above.
 #[allow(non_camel_case_types)]
 #[derive(Debug, FromPrimitive)]
 pub enum Opcode {
@@ -740,16 +744,29 @@ impl InsnLike for Insn {
     }
 }
 
+/// A struct allowing for faster and lazy parsing of instructions by exposing
+/// accessors to the eBPF instruction fields by raw pointer casts.
 #[repr(C, packed)]
 pub struct InsnFast<'a> {
     prog_ref: &'a [u8],
 }
 
+/// Trait encapsulating the behaviour that we need on structs that can be
+/// treated as eBPF instructions. The reason we need this is that the original
+/// rbpf code created a bunch of instructions on the stack by parsing out the
+/// ebpf instructions in the supplied binary, this worsens performance. Instead
+/// we implement the insn fast struct that allows for direct reading of the
+/// instruction values from memory by raw pointer casts
 pub trait InsnLike {
+    /// Lookup method allowing to read the opcode of a given instruction-like struct
     fn opc(&self) -> u8;
+    /// Lookup method allowing to read the destination of a given instruction-like struct
     fn dst(&self) -> u8;
+    /// Lookup method allowing to read the source register of a given instruction-like struct
     fn src(&self) -> u8;
+    /// Lookup method allowing to read the offset of a given instruction-like struct
     fn off(&self) -> i16;
+    /// Lookup method allowing to read the immediate operand of a given instruction-like struct
     fn imm(&self) -> i32;
 }
 
@@ -909,6 +926,8 @@ pub fn get_insn(prog: &[u8], idx: usize) -> Insn {
     }
 }
 
+/// Allows for getting an instruction from an absolute offset inside of the
+/// program.
 #[inline]
 pub fn get_insn_absolute_offset(prog: &[u8], idx: usize) -> Insn {
     // This guard should not be needed in most cases, since the verifier already checks the program
@@ -930,6 +949,13 @@ pub fn get_insn_absolute_offset(prog: &[u8], idx: usize) -> Insn {
     }
 }
 
+/// Allows for reading an InsnFast struct driectly from memory by extracting
+/// a reference to the correct place in memory. This is faster than creating
+/// the Insn objects because it uses something like lazy evaluation whereby
+/// we don't read all possible fields of the instruction struct (and don't
+/// put them onto the stack) unless we absolutely need to (some eBPF instructions
+/// don't set all operands). Benchmarks have demonstrated that this is results
+/// in faster execution of the VM.
 #[inline(always)]
 pub fn get_insn_fast(prog: &[u8], idx: usize) -> InsnFast {
     InsnFast {

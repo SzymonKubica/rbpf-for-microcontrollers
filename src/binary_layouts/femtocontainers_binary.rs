@@ -1,9 +1,9 @@
-use log::debug;
 use crate::lib::*;
+use log::debug;
 
 use crate::ebpf::{self, InsnLike};
 
-use super::{CallInstructionHandler, SectionAccessor, Binary};
+use super::{Binary, CallInstructionHandler, SectionAccessor};
 
 /// Header present at the start of the Femto-Containers binary.
 #[derive(Copy, Clone, Debug)]
@@ -23,6 +23,16 @@ struct FcBytecodeHeader {
     functions_len: u32,
 }
 
+impl core::fmt::Display for FcBytecodeHeader {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Magic: {:#x}, Version: {:#x}, Flags: {:#x}, Data Length: {:#x}, Rodata Length: {:#x}, Text Length: {:#x}, Functions Length: {:#x}",
+            self.magic, self.version, self.flags, self.data_len, self.rodata_len, self.text_len, self.functions_len
+        )
+    }
+}
+
 /// Allows for parsing out the headers of the eBPF binaries that follow the
 /// Femto-Containers custom binary layout. This layout consists of a header [`FcBytecodeHeader`]
 /// containing information about the sections and their lengths present in the
@@ -32,6 +42,26 @@ pub struct FemtoContainersBinary {
     data_section: (usize, usize),
     rodata_section: (usize, usize),
     prog_len: usize,
+}
+
+impl core::fmt::Display for FemtoContainersBinary {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "FemtoContainersBinary:
+             Text Section: (offset: {:#x}, len: {:#x})
+             Data Section: (offset: {:#x}, len: {:#x})
+             Rodata Section: (offset: {:#x}, len: {:#x})
+             Program Length: {:#x}",
+            self.text_section.0,
+            self.text_section.1,
+            self.data_section.0,
+            self.data_section.1,
+            self.rodata_section.0,
+            self.rodata_section.1,
+            self.prog_len
+        )
+    }
 }
 
 impl FemtoContainersBinary {
@@ -53,6 +83,11 @@ impl FemtoContainersBinary {
                 prog_len: (*header).text_len as usize,
             };
 
+            debug!(
+                "Successufully parsed the FemtoContainersBinary: \n{}",
+                program
+            );
+
             program
         }
     }
@@ -61,15 +96,15 @@ impl FemtoContainersBinary {
 impl SectionAccessor for FemtoContainersBinary {
     #[inline(always)]
     fn get_text_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error> {
-        Ok(&program[self.text_section.0..(self.text_section.0+self.text_section.1)])
+        Ok(&program[self.text_section.0..(self.text_section.0 + self.text_section.1)])
     }
     #[inline(always)]
     fn get_data_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error> {
-        Ok(&program[self.data_section.0..(self.data_section.0+self.data_section.1)])
+        Ok(&program[self.data_section.0..(self.data_section.0 + self.data_section.1)])
     }
     #[inline(always)]
     fn get_rodata_section<'a>(&self, program: &'a [u8]) -> Result<&'a [u8], Error> {
-        Ok(&program[self.rodata_section.0..(self.rodata_section.0+self.rodata_section.1)])
+        Ok(&program[self.rodata_section.0..(self.rodata_section.0 + self.rodata_section.1)])
     }
 }
 
@@ -102,7 +137,8 @@ impl CallInstructionHandler for FemtoContainersBinary {
                 // Here the source register 1 indicates that we are making
                 // a call relative to the current instruction pointer
                 return_address_stack.push(*insn_ptr);
-                *insn_ptr = ((*insn_ptr as i32 + insn.imm() * insn_ptr_step_size as i32) as usize) as usize;
+                *insn_ptr =
+                    ((*insn_ptr as i32 + insn.imm() * insn_ptr_step_size as i32) as usize) as usize;
             }
             _ => {
                 Err(Error::new(

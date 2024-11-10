@@ -35,6 +35,25 @@ struct ExtendedBytecodeHeader {
     relocated_calls: u32,
 }
 
+impl core::fmt::Display for ExtendedBytecodeHeader {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Magic: {:#x}, Version: {:#x}, Flags: {:#x}, Data Length: {:#x},
+            Rodata Length: {:#x}, Text Length: {:#x}, Functions Length: {}
+            Relocated calls: {}",
+            self.magic,
+            self.version,
+            self.flags,
+            self.data_len,
+            self.rodata_len,
+            self.text_len,
+            self.functions,
+            self.relocated_calls
+        )
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 struct FunctionRelocation {
     instruction_offset: u32,
@@ -48,6 +67,28 @@ pub struct ExtendedHeaderBinary {
     prog_len: usize,
     relocated_calls: Vec<FunctionRelocation>,
     allowed_helpers: Vec<u8>,
+}
+
+impl core::fmt::Display for ExtendedHeaderBinary {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "FemtoContainersBinary:
+             Text Section: (offset: {:#x}, len: {:#x})
+             Data Section: (offset: {:#x}, len: {:#x})
+             Rodata Section: (offset: {:#x}, len: {:#x})
+             Program Length: {:#x}
+             Allowed helper function indices: {:?}",
+            self.text_section.offset,
+            self.text_section.len,
+            self.data_section.offset,
+            self.data_section.len,
+            self.rodata_section.offset,
+            self.rodata_section.len,
+            self.prog_len,
+            self.allowed_helpers
+        )
+    }
 }
 
 /// This is added for backwards compatibility with Femto-Containers. Their `gen-rbf`
@@ -164,7 +205,8 @@ impl CallInstructionHandler for ExtendedHeaderBinary {
                 // Here the source register 1 indicates that we are making
                 // a call relative to the current instruction pointer
                 return_address_stack.push(*insn_ptr);
-                *insn_ptr = ((*insn_ptr as i32 + insn.imm() * insn_ptr_step_size as i32) as usize) as usize;
+                *insn_ptr =
+                    ((*insn_ptr as i32 + insn.imm() * insn_ptr_step_size as i32) as usize) as usize;
             }
             _ => {
                 Err(Error::new(

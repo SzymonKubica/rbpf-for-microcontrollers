@@ -112,6 +112,7 @@ fn check_registers(insn: &ebpf::Insn, store: bool, insn_ptr: usize) -> Result<()
     }
 }
 
+#[allow(dead_code)]
 struct FemtoContainersHeader {
     magic: u32,   /*Magic number */
     version: u32, /*Version of the application */
@@ -122,6 +123,7 @@ struct FemtoContainersHeader {
     functions: u32,  /*Number of functions available */
 }
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ExtendedHeader {
     magic: u32,   /*Magic number */
     version: u32, /*Version of the application */
