@@ -32,7 +32,7 @@ use crate::InterpreterVariant;
 type MachineCode = unsafe fn(*mut u8, usize, *mut u8, usize) -> u32;
 
 const REGISTER_MAP_SIZE: usize = 11;
-// Mapps from the the ARMv7-eM registers to the eBPF registers
+// Maps from the the ARMv7-eM registers to the eBPF registers
 // Note that the annotations on the right describe the function of the register
 // in the eBPF ISA, which specifies e.g. that SP needs to be the register 10
 // whereas in ARMv7-eM it is R13.
@@ -57,8 +57,8 @@ const REGISTER_MAP: [u8; REGISTER_MAP_SIZE] = [
 /// immediate constant into some register and then use the instruction which operates
 /// on registers. We use this register for that. We need to figure out which registers we
 /// should be able to access and will never be explicitly touched by the eBPF code.
-pub const SPILL_REG1: u8 = R4;
-pub const SPILL_REG2: u8 = R5;
+pub const SPILL_REG1: u8 = R6;
+pub const SPILL_REG2: u8 = R7;
 
 // Return the ARMv7-eM register for the given eBPF register
 fn map_register(r: u8) -> u8 {
@@ -282,18 +282,23 @@ impl JitCompiler {
                 ebpf::ST_B_IMM => {
                     // The ARM ISA does not support storing immediates into memory
                     // We need to load it into a spill register instead and then store it.
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
-                    I::StoreRegisterByteImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?
+                    I::StoreRegisterByteImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
 
                 }
                 ebpf::ST_H_IMM =>  {
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
-                    I::StoreRegisterHalfwordImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?
-
+                    I::StoreRegisterHalfwordImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::ST_W_IMM => {
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
-                    I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?
+                    I::StoreRegisterImmediate { imm: insn.off, rn: dst, rt: SPILL_REG1 }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::ST_DW_IMM =>  error_32_bit_arch()?,
                 // BPF_STX class
@@ -352,15 +357,19 @@ impl JitCompiler {
                     // so we store the value in R4 (SPILL_REG) and hope we didn't overwrite anything
                     // TODO: implement the move instruction for larger encodings
                     // and then use it here to move the immediate into R11
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::MultiplyTwoRegisters { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::MUL32_REG | ebpf::MUL64_REG => {
                     I::MultiplyTwoRegisters { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::DIV32_IMM | ebpf::DIV64_IMM => {
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::SignedDivide { rd: dst, rm: SPILL_REG1, rn: dst }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::DIV32_REG | ebpf::DIV64_REG => {
                     I::SignedDivide { rd: dst, rm: src, rn: dst }.emit_into(mem)?;
@@ -370,27 +379,38 @@ impl JitCompiler {
                     // get around that by performing a signed division and then subtracting the
                     // result times the divisor from the original value of the register, i.e.:
                     // x % y = x - y * (x / y)
+
+                    // register SPILL_REG2 might be occupied as it collides with
+                    // R7, because of this we need to save it and restore after use.
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1, SPILL_REG2] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::SignedDivide { rd: SPILL_REG2, rm: SPILL_REG1, rn: dst }.emit_into(mem)?;
                     I::MultiplyTwoRegisters { rm: SPILL_REG1, rd: SPILL_REG2 }.emit_into(mem)?;
                     I::Subtract { rm: SPILL_REG2, rn: dst, rd: dst }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1, SPILL_REG2] }.emit_into(mem)?
                 }
                 ebpf::MOD32_REG | ebpf::MOD64_REG => {
                     // We need to work around the mod as above
-                    I::SignedDivide { rd: SPILL_REG2, rm: src, rn: dst }.emit_into(mem)?;
-                    I::MultiplyTwoRegisters { rm: src, rd: SPILL_REG2 }.emit_into(mem)?;
-                    I::Subtract { rm: SPILL_REG2, rn: dst, rd: dst }.emit_into(mem)?;
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
+                    I::SignedDivide { rd: SPILL_REG1, rm: src, rn: dst }.emit_into(mem)?;
+                    I::MultiplyTwoRegisters { rm: src, rd: SPILL_REG1 }.emit_into(mem)?;
+                    I::Subtract { rm: SPILL_REG1, rn: dst, rd: dst }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::OR32_IMM | ebpf::OR64_IMM => {
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::LogicalOR { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::OR32_REG | ebpf::OR64_REG => {
                     I::LogicalOR { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::AND32_IMM | ebpf::AND64_IMM => {
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::BitwiseAND { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::AND32_REG | ebpf::AND64_REG => {
                     I::BitwiseAND { rm: src, rd: dst }.emit_into(mem)?;
@@ -445,12 +465,16 @@ impl JitCompiler {
                     I::LogicalShiftRight { rm: src, rd: dst }.emit_into(mem)?;
                 }
                 ebpf::NEG32 | ebpf::NEG64 => {
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: -1 }.emit_into(mem)?;
                     I::MultiplyTwoRegisters { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::XOR32_IMM | ebpf::XOR64_IMM => {
+                    I::PushMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?;
                     I::MoveImmediate { rd: SPILL_REG1, imm: insn.imm }.emit_into(mem)?;
                     I::ExclusiveOR  { rm: SPILL_REG1, rd: dst }.emit_into(mem)?;
+                    I::PopMultipleRegisters { registers: vec![SPILL_REG1] }.emit_into(mem)?
                 }
                 ebpf::XOR32_REG | ebpf::XOR64_REG => {
                     I::ExclusiveOR { rm: src, rd: dst }.emit_into(mem)?;
@@ -688,14 +712,18 @@ impl JitCompiler {
                         // that the CPU knows that we aren't trying to change the instruction set.
                         helper_addr |= 0b1;
 
+                        // Before we overwrite the contents of the spill register,
+                        // we need to back it up on the stack
+                        I::PushMultipleRegisters { registers: vec![SPILL_REG1]  }.emit_into(mem)?;
+
                         I::MoveImmediate { rd: SPILL_REG1, imm: helper_addr as i32 }.emit_into(mem)?;
                         // Important: BLX destroys the contents of the LR register
                         // (because the called functions needs LR to know where to
                         // return to). Because of this, we need to preserve the contents
                         // of LR across function call by pushing it onto the stack
                         // before the call and then popping it afterwards
-                        let registers = vec![LR];
-                        I::PushMultipleRegisters { registers: registers.clone()  }.emit_into(mem)?;
+                        let lr_register = vec![LR];
+                        I::PushMultipleRegisters { registers: lr_register.clone()  }.emit_into(mem)?;
 
                         // Given that the first two args are 32-bit but the signature
                         // of the function expects 64-bit values, we need to
@@ -710,7 +738,6 @@ impl JitCompiler {
                         // it to ensure that arguments are passed correctly as
                         // 32-bit values.
                         I::MoveImmediate { rd: R1, imm: 0 }.emit_into(mem)?;
-
                         // In our case the arguments are 32-bits long so we need
                         // to push an empty word before we push each argument.
                         let empty_register = vec![R1];
@@ -744,7 +771,9 @@ impl JitCompiler {
                         // as we only support programs operating on 32-bit values.
                         I::PopMultipleRegisters { registers: vec![R2, R3] }.emit_into(mem)?;
 
-                        I::PopMultipleRegisters { registers  }.emit_into(mem)?;
+                        I::PopMultipleRegisters { registers: lr_register  }.emit_into(mem)?;
+                        // Restore the spill register 1 that was used for the function call address
+                        I::PopMultipleRegisters { registers: vec![SPILL_REG1]  }.emit_into(mem)?;
                     } else {
                         Err(Error::new(
                             ErrorKind::Other,

@@ -1,4 +1,5 @@
 use crate::jit_thumbv7em::{SPILL_REG1, SPILL_REG2};
+use crate::lib::*;
 use crate::thumb_16bit_encoding::{
     self as thumb16, Emittable, InstructionClassOpcode, Thumb16OpcodeEncoding, BASIC,
     DATA_PROCESSING, MISCELLANEOUS,
@@ -6,7 +7,6 @@ use crate::thumb_16bit_encoding::{
 use crate::thumb_32bit_encoding::{self as thumb32, Thumb32OpcodeEncoding};
 use crate::{jit_thumbv7em::emit, JitMemory};
 use log::debug;
-use crate::lib::*;
 
 // Registers
 pub const R0: u8 = 0;
@@ -61,6 +61,9 @@ pub enum Condition {
     /// Always (unconditional)
     AL = 0b1110,
 }
+
+/// Type alias for conciseness
+type I = ThumbInstruction;
 
 /// The 16b Thumb instructions subset of the ARMv7-M ISA. They are taken directly
 /// from the ARMv7-M Architecture Reference Manual without renaming / abstracting
@@ -456,14 +459,22 @@ impl ThumbInstruction {
                         rd: *rd,
                     }
                     .emit_into(mem)?;
+                    I::PushMultipleRegisters {
+                        registers: vec![SPILL_REG2],
+                    }
+                    .emit_into(mem)?;
                     ThumbInstruction::MoveImmediate {
                         rd: SPILL_REG2,
                         imm: lower_halfword as i32,
                     }
                     .emit_into(mem)?;
-                    return ThumbInstruction::AddRegistersSpecial {
+                    ThumbInstruction::AddRegistersSpecial {
                         rm: SPILL_REG2,
                         rd: *rd,
+                    }
+                    .emit_into(mem);
+                    return I::PopMultipleRegisters {
+                        registers: vec![SPILL_REG2],
                     }
                     .emit_into(mem);
                 }
@@ -521,10 +532,16 @@ impl ThumbInstruction {
                      * to it. We currently don't have it so we spill the immediate
                      * to some register and then use CompareRegister instruction
                      *
+                     * TODO: understand what is going on here.
+                     *
                      *
                     let opcode = Thumb32OpcodeEncoding::new(0b10, 0b11011, 0b0);
                     return thumb32::Imm12OneRegEncoding::new(opcode, *rd, *imm as u16).emit(mem);
                     */
+                    ThumbInstruction::PushMultipleRegisters {
+                        registers: vec![SPILL_REG1],
+                    }
+                    .emit_into(mem)?;
                     ThumbInstruction::MoveImmediate {
                         rd: SPILL_REG1,
                         imm: *imm as i32,
@@ -533,6 +550,10 @@ impl ThumbInstruction {
                     ThumbInstruction::CompareRegisters {
                         rm: SPILL_REG1,
                         rd: *rd,
+                    }
+                    .emit_into(mem);
+                    ThumbInstruction::PopMultipleRegisters {
+                        registers: vec![SPILL_REG1],
                     }
                     .emit_into(mem)
                 }
